@@ -1,0 +1,15 @@
+[package]
+name = "dorestic"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "*", features = ["derive"] }
+directories = "5"
+env_logger = "*"
+futures = { version = "*" }
+log = "*"
+serde = { version = "*", features = ["derive"] }
+serde_json = "*"
+sqlx = { version = "*", features = ["runtime-tokio", "sqlite"] }
+tokio = { version = "*", features = ["rt", "rt-multi-thread", "macros"] }
