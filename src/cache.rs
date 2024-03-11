@@ -9,7 +9,7 @@ use crate::types::{File, Snapshot};
 
 #[derive(Debug)]
 pub enum Error {
-    DirectoryError(&'static str),
+    DirectoryError(String),
     SqlError(sqlx::Error),
 }
 
@@ -19,19 +19,21 @@ impl From<sqlx::Error> for Error {
 
 #[derive(Debug)]
 pub struct Cache {
-    dir: String,
+    file: String,
     conn: SqliteConnection,
 }
 
 impl Cache {
-    pub async fn open() -> Result<Self, Error>
+    pub async fn open(name: &str) -> Result<Self, Error>
     {
         let dir = ProjectDirs::from("eu", "drdo", "dorestic")
-            .ok_or_else(|| Error::DirectoryError("could not determine appropriate cache location"))?
+            .ok_or_else(|| Error::DirectoryError("could not determine appropriate cache location".to_string()))?
             .cache_dir()
             .to_string_lossy()
             .into_owned();
-        let mut conn = SqliteConnection::connect(format!("sqlite://{dir}/cache.db?mode=rwc").as_str()).await?;
+        let file = format!("{dir}/{name}.db");
+        std::fs::create_dir_all(&dir).map_err(|e| Error::DirectoryError(e.to_string()))?;
+        let mut conn = SqliteConnection::connect(format!("sqlite://{file}?mode=rwc").as_str()).await?;
         let mut transaction = conn.begin().await?;
         let stmts = [
             "CREATE TABLE IF NOT EXISTS snapshots (\
@@ -55,10 +57,10 @@ impl Cache {
             sqlx::query(stmt).execute(transaction.as_mut()).await?;
         }
         transaction.commit().await?;
-        Ok(Cache{dir, conn})
+        Ok(Cache{file, conn})
     }
 
-    pub fn dir(&self) -> &str { self.dir.as_str() }
+    pub fn file(&self) -> &str { self.file.as_str() }
 
     pub async fn get_snapshots<'c>(&mut self) -> Result<Vec<Snapshot>, Error>
     {

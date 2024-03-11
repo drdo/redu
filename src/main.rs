@@ -26,12 +26,13 @@ struct Cli {
 async fn main() {
     env_logger::init();
     let cli = Cli::parse();
-    let mut cache = Cache::open().await.unwrap();
     let restic = Restic::new(&cli.repo, cli.password_command.as_ref().map(|s| s.as_str()));
+    let repo_id = restic.config().unwrap().id;
+    let mut cache = Cache::open(repo_id.as_str()).await.unwrap();
 
-    eprintln!("Using cache directory '{}'", cache.dir());
+    eprintln!("Using cache file '{}'", cache.file());
 
-    // Gather data from restic
+    // Figure out what snapshots we need to update
     let snapshots: Vec<Snapshot> = {
         eprintln!("Fetching restic snapshot list");
         let restic_snapshots = restic.snapshots().unwrap();
@@ -47,6 +48,8 @@ async fn main() {
         let db_snapshots = cache.get_snapshots().await.unwrap();
         restic_snapshots.into_iter().filter(|s| ! db_snapshots.contains(s)).collect()
     };
+
+    // Update snapshots
     if snapshots.len() > 0 {
         eprintln!("Need to fetch {} snapshot(s)", snapshots.len());
         for (snapshot, i) in snapshots.iter().zip(1..) {

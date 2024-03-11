@@ -1,11 +1,17 @@
-use crate::types::{File, Snapshot};
-use serde_json::{Deserializer, Value};
 use std::io::BufReader;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
+
+use serde::de::DeserializeOwned;
+use serde::Deserialize;
+use serde_json::{Deserializer, Value};
+
+use crate::restic::Error::ExitError;
+use crate::types::{File, Snapshot};
 
 #[derive(Debug)]
 pub enum Error {
     IOError(std::io::Error),
+    ExitError(ExitStatus),
     ParseError(serde_json::Error),
 }
 
@@ -31,31 +37,35 @@ impl Restic {
         Restic { repo: String::from(repo), password_command: password_command.map(String::from) }
     }
 
-    fn new_command(&self) -> Command {
+    fn run_command<'a>(
+        &self, args: impl IntoIterator<Item=&'a str>
+    ) -> Result<Child, Error>
+    {
         let mut cmd = Command::new("restic");
         cmd.arg("--repo").arg(&self.repo);
         for password_command in &self.password_command {
             cmd.arg("--password-command").arg(password_command);
         }
         cmd.arg("--json");
-        cmd
+        cmd.args(args);
+        Ok(cmd
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .spawn()?)
+    }
+
+    pub fn config(&self) -> Result<Config, Error> {
+        json_from_stdout(&mut self.run_command(["cat", "config"])?)
     }
 
     pub fn snapshots(&self) -> Result<Vec<Snapshot>, Error> {
-        let child_stdout = self.new_command()
-            .arg("snapshots")
-            .stdout(Stdio::piped())
-            .spawn()?
-            .stdout
-            .expect("Stdout expected. This should not happen");
-        let mut reader = BufReader::new(child_stdout);
-        Ok(serde_json::from_reader(&mut reader)?)
+        json_from_stdout(&mut self.run_command(["snapshots"])?)
     }
 
     pub fn ls<'a>(
         &self,
         snapshot: &'a str,
-    ) -> Result<impl Iterator<Item = Result<File<'a>, serde_json::Error>>, std::io::Error>
+    ) -> Result<impl Iterator<Item = Result<File<'a>, Error>>, Error>
     {
         let parse_entry = |mut v: Value| -> Option<File> {
             let mut m = std::mem::take(v.as_object_mut()?);
@@ -68,16 +78,42 @@ impl Restic {
             Some(File { snapshot, path, size })
         };
 
-        let child_stdout = self.new_command()
-            .arg("ls")
-            .arg(snapshot)
-            .stdout(Stdio::piped())
-            .spawn()?
-            .stdout
-            .expect("Stdout expected. This should not happen");
-        let reader = BufReader::new(child_stdout);
-        Ok(Deserializer::from_reader(reader)
-            .into_iter::<Value>()
-            .filter_map(move |r| r.map(parse_entry).transpose()))
+        let mut child = self.run_command(["ls", snapshot])?;
+        let reader = BufReader::new(child.stdout.take().unwrap());
+        Ok(
+            Deserializer::from_reader(reader)
+                .into_iter::<Value>()
+                .filter_map(move |r: Result<Value, serde_json::Error>|
+                    r.map(parse_entry).transpose())
+                .map(move |r: Result<File, serde_json::Error>| {
+                    let v = r?;
+                    if let Some(status) = child.try_wait()? {
+                        if ! status.success() {
+                            return Err(Error::ExitError(status))
+                        }
+                    }
+                    Ok(v)
+                })
+
+        )
+    }
+}
+
+#[derive(Deserialize)]
+pub struct Config {
+    pub version: u32,
+    pub id: String,
+}
+
+////////////////////////////////////////////////////////////////////////////////
+/// Panics if there is no stdout
+fn json_from_stdout<T: DeserializeOwned>(child: &mut Child) -> Result<T, Error> {
+    let reader = BufReader::new(child.stdout.take().unwrap());
+    let config = serde_json::from_reader(reader)?;
+    let status = child.wait()?;
+    if status.success() {
+        Ok(config)
+    } else {
+        Err(ExitError(status))
     }
 }
