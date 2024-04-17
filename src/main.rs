@@ -1,9 +1,10 @@
 #![feature(iter_intersperse)]
+#![feature(try_blocks)]
 
 use std::io::stdout;
 use clap::{command, Parser};
 
-use futures::TryStreamExt;
+use futures::{StreamExt, TryStreamExt};
 use crate::cache::Cache;
 use crate::restic::Restic;
 
@@ -27,7 +28,7 @@ async fn main() {
     env_logger::init();
     let cli = Cli::parse();
     let restic = Restic::new(&cli.repo, cli.password_command.as_ref().map(|s| s.as_str()));
-    let repo_id = restic.config().unwrap().id;
+    let repo_id = restic.config().await.0.unwrap().id;
     let mut cache = Cache::open(repo_id.as_str()).await.unwrap();
 
     eprintln!("Using cache file '{}'", cache.file());
@@ -35,7 +36,7 @@ async fn main() {
     // Figure out what snapshots we need to update
     let snapshots: Vec<Snapshot> = {
         eprintln!("Fetching restic snapshot list");
-        let restic_snapshots = restic.snapshots().unwrap();
+        let restic_snapshots = restic.snapshots().await.0.unwrap();
 
         // Delete snapshots from the DB that were deleted on Restic
         for snapshot in cache.get_snapshots().await.unwrap() {
@@ -54,8 +55,9 @@ async fn main() {
         eprintln!("Need to fetch {} snapshot(s)", snapshots.len());
         for (snapshot, i) in snapshots.iter().zip(1..) {
             eprintln!("Fetching snapshot {:?} [{}/{}]", &snapshot.id, i, snapshots.len());
-            for e in restic.ls(snapshot.id.as_str()).unwrap() {
-                cache.add_file(&e.unwrap()).await.unwrap();
+            let (mut files, _) = restic.ls(snapshot.id.as_str()).await;
+            while let Some(f) = files.next().await {
+                cache.add_file(&f.unwrap()).await.unwrap();
             }
             cache.finish_snapshot(snapshot.id.as_str()).await.unwrap();
         }

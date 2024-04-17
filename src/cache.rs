@@ -71,14 +71,14 @@ impl Cache {
 
     pub async fn add_file<'a>(
         &mut self,
-        entry: &File<'a>,
+        entry: &File,
     ) -> Result<(), Error>
     {
         let mut transaction = self.conn.begin().await?;
         let stmts = [
             sqlx::query("INSERT OR REPLACE INTO files (snapshot, path, size) VALUES (?, ?, ?)")
-                .bind(entry.snapshot)
-                .bind(entry.path.as_str())
+                .bind(&*entry.snapshot)
+                .bind(entry.path.join("/"))
                 .bind(entry.size as i64),
             sqlx::query("INSERT OR REPLACE INTO flags (name) VALUES ('max_files_cache_dirty')"),
         ];

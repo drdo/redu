@@ -4,12 +4,18 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+chrono = "*"
 clap = { version = "*", features = ["derive"] }
+crossterm = { version = "*", features = ["event-stream"] }
 directories = "5"
 env_logger = "*"
 futures = { version = "*" }
 log = "*"
+nix = { version = "*", features = ["process"] }
+ratatui = { version = "*", features = ["unstable-widget-ref"] }
+scopeguard = "*"
 serde = { version = "*", features = ["derive"] }
 serde_json = "*"
 sqlx = { version = "*", features = ["runtime-tokio", "sqlite"] }
-tokio = { version = "*", features = ["rt", "rt-multi-thread", "macros"] }
+tokio = { version = "*", features = ["macros", "io-std", "process", "rt-multi-thread", "rt"] }
+tokio-util = { version = "*", features = ["codec"] }
