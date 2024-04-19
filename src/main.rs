@@ -65,18 +65,5 @@ async fn main() {
         eprintln!("Snapshots up to date");
     }
 
-    // Emit ncdu output
-    eprintln!("Writing ncdu output");
-    {
-        let mut stream = cache.get_max_file_sizes().await.unwrap();
-        let mut ncdu_writer = ncdu::Writer::new(stdout());
-        ncdu_writer.header().unwrap();
-        while let Some((path, size)) = stream.try_next().await.unwrap() {
-            let components = path.split('/').filter(|s| !s.is_empty()).collect::<Vec<_>>();
-            let (file, dir) = components.split_last().unwrap();
-            ncdu_writer.change_dir(dir).unwrap();
-            ncdu_writer.file(file, size).unwrap();
-        }
-        ncdu_writer.finish().unwrap();
     }
 }
