@@ -3,17 +3,25 @@
 
 use std::io::stdout;
 use clap::{command, Parser};
+use crossterm::event::{Event, EventStream, KeyCode};
 
 use futures::{StreamExt, TryStreamExt};
+use ratatui::CompletedFrame;
+use ratatui::widgets::{List, ListItem, Widget};
+use tokio::select;
+use tokio::sync::mpsc;
 use crate::cache::Cache;
 use crate::restic::Restic;
+use crate::state::{FileData, State};
+use crate::tui::Tui;
 
 use crate::types::Snapshot;
 
 mod cache;
 mod restic;
 mod types;
-mod ncdu;
+mod tui;
+mod state;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -21,6 +29,26 @@ struct Cli {
     repo: String,
     #[arg(long)]
     password_command: Option<String>,
+}
+
+enum Action {
+    Render,
+}
+
+fn render<'a>(
+    tui: &'a mut Tui,
+    state: &'_ State,
+) -> std::io::Result<CompletedFrame<'a>>
+{
+    tui.draw(|frame| {
+        let area = frame.size();
+        let buf = frame.buffer_mut();
+        let items = state.files.get::<&str, _>([])
+            .map(|FileData { snapshot, size }| {
+                ListItem::new(format!("{snapshot} : {size}"))
+            });
+        List::new(items).render(area, buf);
+    })
 }
 
 #[tokio::main]
@@ -65,5 +93,30 @@ async fn main() {
         eprintln!("Snapshots up to date");
     }
 
+    // UI
+    let (action_tx, mut action_rx) = mpsc::channel(512);
+    let mut tui = Tui::new().unwrap();
+    let mut terminal_events = EventStream::new();
+    let mut state = State::new();
+
+    loop {
+        select! {
+            action = action_rx.recv() => { match action {
+                Some(Action::Render) => { render(&mut tui, &state).unwrap(); },
+                None => break,
+            }}
+            event = terminal_events.try_next() => { match event.unwrap() {
+                Some(event) => match event {
+                    Event::Key(k) if k.code == KeyCode::Char('q') => {
+                        break;
+                    }
+                    Event::Resize(_, _) => {
+                        action_tx.send(Action::Render).await.unwrap();
+                    }
+                    _ => {}
+                },
+                None => break,
+            }}
+        }
     }
 }
