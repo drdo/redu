@@ -55,6 +55,7 @@ async fn main() {
     env_logger::init();
     let cli = Cli::parse();
     let restic = Restic::new(&cli.repo, cli.password_command.as_ref().map(|s| s.as_str()));
+    eprintln!("Getting restic config");
     let repo_id = restic.config().await.0.unwrap().id;
     let mut cache = Cache::open(repo_id.as_str()).unwrap();
 
@@ -91,6 +92,24 @@ async fn main() {
     } else {
         eprintln!("Snapshots up to date");
     }
+
+    // TODO:
+    // !!! Redesign database !!!
+    // You are going to query something like _all children of X_
+    // A good way to store the filesystem is probably
+    // (snapshot, parent, name, size)
+    //
+    // Research how to upsert file and then update
+    // parent size iff it was actually newly inserted
+    //
+    // Keep path in memory but only keep in memory the files in that path.
+    // Don't try to store everything in memory.
+    // But store the files for all snapshots in that path in memory.
+    // Path, Map<File, Vec<Snapshot>>
+    // let mut stream = cache.get_max_file_sizes().await.unwrap();
+    // while let Some(r) = stream.next().await {
+    //     let (
+    // }
 
     // UI
     let (action_tx, mut action_rx) = mpsc::channel(512);
