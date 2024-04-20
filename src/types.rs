@@ -1,16 +1,15 @@
 use std::sync::Arc;
 
 use serde::Deserialize;
-use sqlx::FromRow;
 
-#[derive(Debug, Deserialize, FromRow, PartialEq, Eq)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 pub struct Snapshot {
-    pub id: String,
+    pub id: Box<str>,
 }
 
 #[derive(Clone, Debug)]
 pub struct File {
-    pub path: Arc<[String]>,
     pub snapshot: Arc<str>,
+    pub path: Arc<[String]>,
     pub size: u64,
 }

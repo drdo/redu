@@ -1,20 +1,18 @@
 #![feature(iter_intersperse)]
 #![feature(try_blocks)]
 
-use std::io::stdout;
 use clap::{command, Parser};
 use crossterm::event::{Event, EventStream, KeyCode};
-
 use futures::{StreamExt, TryStreamExt};
 use ratatui::CompletedFrame;
 use ratatui::widgets::{List, ListItem, Widget};
 use tokio::select;
 use tokio::sync::mpsc;
+
 use crate::cache::Cache;
 use crate::restic::Restic;
 use crate::state::{FileData, State};
 use crate::tui::Tui;
-
 use crate::types::Snapshot;
 
 mod cache;
@@ -43,9 +41,10 @@ fn render<'a>(
     tui.draw(|frame| {
         let area = frame.size();
         let buf = frame.buffer_mut();
-        let items = state.files.get::<&str, _>([])
-            .map(|FileData { snapshot, size }| {
-                ListItem::new(format!("{snapshot} : {size}"))
+        let items = state.files
+            .iter()
+            .map(|(name, FileData { snapshot, size })| {
+                ListItem::new(format!("{name} : {snapshot} : {size}"))
             });
         List::new(items).render(area, buf);
     })
@@ -57,9 +56,9 @@ async fn main() {
     let cli = Cli::parse();
     let restic = Restic::new(&cli.repo, cli.password_command.as_ref().map(|s| s.as_str()));
     let repo_id = restic.config().await.0.unwrap().id;
-    let mut cache = Cache::open(repo_id.as_str()).await.unwrap();
+    let mut cache = Cache::open(repo_id.as_str()).unwrap();
 
-    eprintln!("Using cache file '{}'", cache.file());
+    eprintln!("Using cache file '{}'", cache.filename());
 
     // Figure out what snapshots we need to update
     let snapshots: Vec<Snapshot> = {
@@ -67,14 +66,14 @@ async fn main() {
         let restic_snapshots = restic.snapshots().await.0.unwrap();
 
         // Delete snapshots from the DB that were deleted on Restic
-        for snapshot in cache.get_snapshots().await.unwrap() {
+        for snapshot in cache.get_snapshots().unwrap() {
             if ! restic_snapshots.contains(&snapshot) {
-                eprintln!("Deleting DB Snapshot {:?} (missing from restic)", snapshot.id.as_str());
-                cache.delete_snapshot(snapshot.id.as_str()).await.unwrap();
+                eprintln!("Deleting DB Snapshot {:?} (missing from restic)", snapshot.id);
+                cache.delete_snapshot(&snapshot.id).unwrap();
             }
         }
 
-        let db_snapshots = cache.get_snapshots().await.unwrap();
+        let db_snapshots = cache.get_snapshots().unwrap();
         restic_snapshots.into_iter().filter(|s| ! db_snapshots.contains(s)).collect()
     };
 
@@ -83,11 +82,11 @@ async fn main() {
         eprintln!("Need to fetch {} snapshot(s)", snapshots.len());
         for (snapshot, i) in snapshots.iter().zip(1..) {
             eprintln!("Fetching snapshot {:?} [{}/{}]", &snapshot.id, i, snapshots.len());
-            let (mut files, _) = restic.ls(snapshot.id.as_str()).await;
+            let (mut files, _) = restic.ls(&snapshot.id).await;
             while let Some(f) = files.next().await {
-                cache.add_file(&f.unwrap()).await.unwrap();
+                cache.upsert_file(&f.unwrap()).unwrap();
             }
-            cache.finish_snapshot(snapshot.id.as_str()).await.unwrap();
+            cache.finish_snapshot(&snapshot).unwrap();
         }
     } else {
         eprintln!("Snapshots up to date");
