@@ -116,11 +116,20 @@ impl State {
     }
 
     pub fn move_selection(&mut self, delta: isize) {
+        if delta == 0 { return }
         let len = match self.files.len() {
             0 => return,
             n => n,
         };
-        let selected = self.selected.get_or_insert(0);
-        *selected = (*selected as isize + delta).rem_euclid(len as isize) as usize;
+        let new_index = match self.selected {
+            None =>
+                if delta < 0 {
+                    (len as isize) + delta
+                } else {
+                    delta - 1
+                }
+            Some(selected) => selected as isize + delta
+        };
+        self.selected = Some(new_index.rem_euclid(len as isize) as usize);
     }
 }
