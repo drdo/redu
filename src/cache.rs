@@ -101,7 +101,8 @@ impl Cache {
                     "SELECT path, max(size) as size \
                      FROM files \
                      WHERE path_parent(path) IS NULL \
-                     GROUP BY path")?;
+                     GROUP BY path \
+                     ORDER BY size DESC")?;
                 let rows = stmt.query_and_then([], aux)?;
                 rows.collect()
             }
@@ -110,7 +111,8 @@ impl Cache {
                     "SELECT path, max(size) as size \
                      FROM files \
                      WHERE path_parent(path) = ? \
-                     GROUP BY path")?;
+                     GROUP BY path \
+                     ORDER BY size DESC")?;
                 let rows = stmt.query_and_then([path.as_ref().as_str()], aux)?;
                 rows.collect()
             }
