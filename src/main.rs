@@ -1,25 +1,28 @@
 #![feature(iter_intersperse)]
+#![feature(panic_update_hook)]
 #![feature(try_blocks)]
 
-use std::cmp;
+use std::{cmp, panic};
+use std::io::stdout;
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{command, Parser};
 use crossterm::event::{Event, EventStream, KeyCode};
+use crossterm::ExecutableCommand;
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use futures::TryStreamExt;
-use ratatui::CompletedFrame;
+use ratatui::{CompletedFrame, Terminal};
+use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::style::Stylize;
 use ratatui::widgets::{List, ListItem, Widget};
 
 use crate::cache::Cache;
 use crate::restic::Restic;
 use crate::state::State;
-use crate::tui::Tui;
 use crate::types::Snapshot;
 
 mod cache;
 mod restic;
 mod types;
-mod tui;
 mod state;
 
 #[derive(Parser)]
@@ -32,11 +35,11 @@ struct Cli {
 }
 
 fn render<'a>(
-    tui: &'a mut Tui,
+    terminal: &'a mut Terminal<impl Backend>,
     state: &'_ State,
 ) -> std::io::Result<CompletedFrame<'a>>
 {
-    tui.draw(|frame| {
+    terminal.draw(|frame| {
         let area = frame.size();
         let buf = frame.buffer_mut();
         let items = state.files()
@@ -99,14 +102,26 @@ async fn main() {
     }
 
     // UI
-    let mut tui = Tui::new().unwrap();
+    stdout().execute(EnterAlternateScreen).unwrap();
+    panic::update_hook(|prev, info| {
+        stdout().execute(LeaveAlternateScreen).unwrap();
+        prev(info);
+    });
+    enable_raw_mode().unwrap();
+    panic::update_hook(|prev, info| {
+        disable_raw_mode().unwrap();
+        prev(info);
+    });
+    let mut terminal = Terminal::new(CrosstermBackend::new(stdout())).unwrap();
+    terminal.clear().unwrap();
+
     let mut terminal_events = EventStream::new();
     let mut state = State::new(
         Some(Utf8Path::new("/")),
         cache.get_max_file_sizes(Some("/")).unwrap(),
     );
 
-    render(&mut tui, &state).unwrap();
+    render(&mut terminal, &state).unwrap();
     while let Some(event) = terminal_events.try_next().await.unwrap() {
         match event {
             Event::Key(k) => match k.code {
@@ -153,6 +168,6 @@ async fn main() {
             }
             _ => {}
         }
-        render(&mut tui, &state).unwrap();
+        render(&mut terminal, &state).unwrap();
     }
 }
