@@ -25,6 +25,7 @@ mod state;
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Cli {
+    #[arg(short = 'r', long)]
     repo: String,
     #[arg(long)]
     password_command: Option<String>,
