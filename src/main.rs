@@ -3,7 +3,7 @@
 
 use clap::{command, Parser};
 use crossterm::event::{Event, EventStream, KeyCode};
-use futures::{StreamExt, TryStreamExt};
+use futures::TryStreamExt;
 use ratatui::CompletedFrame;
 use ratatui::widgets::{List, ListItem, Widget};
 use tokio::select;
@@ -84,32 +84,26 @@ async fn main() {
         for (snapshot, i) in snapshots.iter().zip(1..) {
             eprintln!("Fetching snapshot {:?} [{}/{}]", &snapshot.id, i, snapshots.len());
             let (mut files, _) = restic.ls(&snapshot.id).await;
-            while let Some(f) = files.next().await {
-                cache.upsert_file(&f.unwrap()).unwrap();
+            let handle = cache.start_snapshot(&snapshot.id).unwrap();
+            while let Some(f) = files.try_next().await.unwrap() {
+                handle.insert_file(&f.path, f.size).unwrap()
             }
-            cache.finish_snapshot(&snapshot).unwrap();
+            handle.finish().unwrap();
         }
     } else {
         eprintln!("Snapshots up to date");
     }
 
-    // TODO:
-    // !!! Redesign database !!!
-    // You are going to query something like _all children of X_
-    // A good way to store the filesystem is probably
-    // (snapshot, parent, name, size)
-    //
-    // Research how to upsert file and then update
-    // parent size iff it was actually newly inserted
-    //
-    // Keep path in memory but only keep in memory the files in that path.
-    // Don't try to store everything in memory.
-    // But store the files for all snapshots in that path in memory.
-    // Path, Map<File, Vec<Snapshot>>
-    // let mut stream = cache.get_max_file_sizes().await.unwrap();
-    // while let Some(r) = stream.next().await {
-    //     let (
-    // }
+    eprintln!("########## / ############");
+    for x in cache.get_max_file_sizes(Some("/".into())).unwrap() {
+        eprintln!("{}: {}", x.0, x.1);
+    }
+
+    eprintln!("########## None ############");
+    for x in cache.get_max_file_sizes(None).unwrap() {
+        eprintln!("{}: {}", x.0, x.1);
+    }
+    return;
 
     // UI
     let (action_tx, mut action_rx) = mpsc::channel(512);

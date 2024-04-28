@@ -1,7 +1,8 @@
 use std::pin::Pin;
 use std::process::{ExitStatus, Stdio};
-use std::sync::Arc;
+use std::rc::Rc;
 
+use camino::Utf8PathBuf;
 use futures::{Stream, stream, StreamExt};
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -94,23 +95,13 @@ impl Restic {
     pub async fn ls(&self, snapshot: &str) -> StreamOutput<File>
     {
         let parse_entry = {
-            let snapshot = String::from(snapshot);
+            let snapshot: Rc<str> = Rc::from(snapshot);
             move |mut v: Value| -> Option<File> {
                 let mut m = std::mem::take(v.as_object_mut()?);
-                let raw_path = if let Value::String(s) = m.remove("path")? {
-                    s
-                } else {
-                    return None;
-                };
-                let size = m.remove("size")?.as_u64()?;
                 Some(File {
-                    snapshot: Arc::from(snapshot.clone()),
-                    path: Arc::from(raw_path
-                        .split("/")
-                        .map(String::from)
-                        .collect::<Vec<_>>()
-                    ),
-                    size
+                    snapshot: snapshot.clone(),
+                    path: Utf8PathBuf::from(m.remove("path")?.as_str()?),
+                    size: m.remove("size")?.as_u64()? as usize,
                 })
             }
         };

@@ -1,5 +1,5 @@
-use std::sync::Arc;
-
+use std::rc::Rc;
+use camino::Utf8PathBuf;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -9,7 +9,7 @@ pub struct Snapshot {
 
 #[derive(Clone, Debug)]
 pub struct File {
-    pub snapshot: Arc<str>,
-    pub path: Arc<[String]>,
-    pub size: u64,
+    pub snapshot: Rc<str>,
+    pub path: Utf8PathBuf,
+    pub size: usize,
 }

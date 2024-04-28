@@ -1,15 +1,17 @@
 use std::borrow::Borrow;
 use std::collections::HashMap;
-use std::sync::Arc;
+
+use camino::Utf8PathBuf;
+
 use crate::types::File;
 
 pub struct Files {
     children: HashMap<Box<str>, Files>,
-    items: HashMap<Arc<str>, u64>,
+    items: HashMap<Box<str>, u64>,
 }
 
 pub struct FileData {
-    pub snapshot: Arc<str>,
+    pub snapshot: Box<str>,
     pub size: u64,
 }
 
@@ -48,21 +50,21 @@ impl Files {
         let mut current = self;
         for segment in file.path.iter() {
             current = current.children
-                .entry(segment.clone().into())
+                .entry(segment.into())
                 .or_insert_with(|| Files::new());
         }
     }
 }
 
 pub struct State {
-    pub path: Vec<String>,
+    pub path: Utf8PathBuf,
     pub files: HashMap<Box<str>, FileData>,
 }
 
 impl State {
     pub fn new() -> Self {
         State {
-            path: Vec::new(),
+            path: Utf8PathBuf::new(),
             files: HashMap::new(),
         }
     }
