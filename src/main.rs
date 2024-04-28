@@ -1,17 +1,18 @@
 #![feature(iter_intersperse)]
 #![feature(try_blocks)]
 
+use std::cmp;
+
 use clap::{command, Parser};
 use crossterm::event::{Event, EventStream, KeyCode};
 use futures::TryStreamExt;
 use ratatui::CompletedFrame;
+use ratatui::style::Stylize;
 use ratatui::widgets::{List, ListItem, Widget};
-use tokio::select;
-use tokio::sync::mpsc;
 
 use crate::cache::Cache;
 use crate::restic::Restic;
-use crate::state::{FileData, State};
+use crate::state::State;
 use crate::tui::Tui;
 use crate::types::Snapshot;
 
@@ -29,10 +30,6 @@ struct Cli {
     password_command: Option<String>,
 }
 
-enum Action {
-    Render,
-}
-
 fn render<'a>(
     tui: &'a mut Tui,
     state: &'_ State,
@@ -43,8 +40,14 @@ fn render<'a>(
         let buf = frame.buffer_mut();
         let items = state.files
             .iter()
-            .map(|(name, FileData { snapshot, size })| {
-                ListItem::new(format!("{name} : {snapshot} : {size}"))
+            .enumerate()
+            .map(|(index, (name, size))| {
+                let item = ListItem::new(format!("{name} : {size}"));
+                if Some(index) == state.selected {
+                    item.black().on_white()
+                } else {
+                    item
+                }
             });
         List::new(items).render(area, buf);
     })
@@ -95,29 +98,25 @@ async fn main() {
     }
 
     // UI
-    let (action_tx, mut action_rx) = mpsc::channel(512);
     let mut tui = Tui::new().unwrap();
     let mut terminal_events = EventStream::new();
-    let mut state = State::new();
+    let mut state = State {
+        path: Some("/".into()),
+        files: cache.get_max_file_sizes(Some("/".into())).unwrap(),
+        selected: None,
+    };
 
-    loop {
-        select! {
-            action = action_rx.recv() => { match action {
-                Some(Action::Render) => { render(&mut tui, &state).unwrap(); },
-                None => break,
-            }}
-            event = terminal_events.try_next() => { match event.unwrap() {
-                Some(event) => match event {
-                    Event::Key(k) if k.code == KeyCode::Char('q') => {
-                        break;
-                    }
-                    Event::Resize(_, _) => {
-                        action_tx.send(Action::Render).await.unwrap();
-                    }
-                    _ => {}
-                },
-                None => break,
-            }}
+    render(&mut tui, &state).unwrap();
+    while let Some(event) = terminal_events.try_next().await.unwrap() {
+        match event {
+            Event::Key(k) => match k.code {
+                KeyCode::Char('q') => break,
+                KeyCode::Down => state.move_selection(1),
+                KeyCode::Up => state.move_selection(-1),
+                _ => {},
+            }
+            _ => {}
         }
+        render(&mut tui, &state).unwrap();
     }
 }

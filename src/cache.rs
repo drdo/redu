@@ -80,16 +80,16 @@ impl Cache {
     pub fn get_max_file_sizes(
         &self,
         path: Option<&Utf8Path>,
-    ) -> Result<Vec<(Utf8PathBuf, usize)>, rusqlite::Error>
+    ) -> Result<Vec<(Box<str>, usize)>, rusqlite::Error>
     {
-        let (mut stmt, params) = match path {
+        let (prefix, mut stmt, params) = match path {
             None => {
                 let stmt = self.conn.prepare(
                     "SELECT path, max(size) as size \
                      FROM files \
                      WHERE path_parent(path) IS NULL \
                      GROUP BY path")?;
-                (stmt, params![])
+                ("".to_owned(), stmt, params![])
             }
             Some(path) => {
                 let stmt = self.conn.prepare(
@@ -97,12 +97,15 @@ impl Cache {
                      FROM files \
                      WHERE path_parent(path) = ? \
                      GROUP BY path")?;
-                (stmt, params![path.as_str()])
+                (path.to_string(), stmt, params![path.as_str()])
             }
         };
         let rows = stmt
             .query_and_then(params, |row| {
-                let path = row.get::<&str, String>("path")?.into();
+                let path = row.get::<&str, String>("path")?
+                    .strip_prefix(&prefix)
+                    .unwrap()
+                    .into();
                 let size = row.get("size")?;
                 Ok((path, size)) })?;
         rows.collect()

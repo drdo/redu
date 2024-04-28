@@ -1,4 +1,5 @@
 use std::borrow::Borrow;
+use std::cmp;
 use std::collections::HashMap;
 
 use camino::Utf8PathBuf;
@@ -57,15 +58,18 @@ impl Files {
 }
 
 pub struct State {
-    pub path: Utf8PathBuf,
-    pub files: HashMap<Box<str>, FileData>,
+    pub path: Option<Utf8PathBuf>,
+    pub files: Vec<(Box<str>, usize)>,
+    pub selected: Option<usize>,
 }
 
 impl State {
-    pub fn new() -> Self {
-        State {
-            path: Utf8PathBuf::new(),
-            files: HashMap::new(),
-        }
+    pub fn move_selection(&mut self, delta: isize) {
+        let len = match self.files.len() {
+            0 => return,
+            n => n,
+        };
+        let selected = self.selected.get_or_insert(0);
+        *selected = (*selected as isize + delta).rem_euclid(len as isize) as usize;
     }
 }
