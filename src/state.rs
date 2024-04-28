@@ -1,8 +1,7 @@
-use std::borrow::Borrow;
-use std::cmp;
+use std::borrow::{Borrow, Cow};
 use std::collections::HashMap;
 
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 
 use crate::types::File;
 
@@ -58,12 +57,62 @@ impl Files {
 }
 
 pub struct State {
-    pub path: Option<Utf8PathBuf>,
-    pub files: Vec<(Box<str>, usize)>,
-    pub selected: Option<usize>,
+    path: Option<Utf8PathBuf>,
+    files: Vec<(Utf8PathBuf, usize)>,
+    selected: Option<usize>,
+    pub offset: usize,
 }
 
 impl State {
+    pub fn new<'a, P>(
+        path: Option<P>,
+        files: Vec<(Utf8PathBuf, usize)>,
+    ) -> Self
+    where
+        P: Into<Cow<'a, Utf8Path>>,
+    {
+        State {
+            path: path.map(|p| p.into().into_owned()),
+            files,
+            selected: None,
+            offset: 0,
+        }
+    }
+
+    pub fn set_files<'a, P>(
+        &mut self,
+        path: Option<P>,
+        files: Vec<(Utf8PathBuf, usize)>,
+    )
+    where
+        P: Into<Cow<'a, Utf8Path>>,
+    {
+        self.path = path.map(|p| p.into().into_owned());
+        self.files = files;
+    }
+    pub fn files(&self) -> &[(Utf8PathBuf, usize)] {
+        &self.files
+    }
+
+    pub fn path(&self) -> Option<&Utf8Path> {
+        self.path.as_deref()
+    }
+
+    pub fn selected_file(&self) -> Option<(&Utf8Path, usize)> {
+        self.selected.map(|i| {
+            let (name, size) = &self.files[i];
+            (&**name, *size)
+        })
+    }
+
+    pub fn selected(&self) -> Option<usize> {
+        self.selected
+    }
+
+    pub fn is_selected(&self, index: usize) -> bool {
+        Some(index) == self.selected
+    }
+
     pub fn move_selection(&mut self, delta: isize) {
         let len = match self.files.len() {
             0 => return,

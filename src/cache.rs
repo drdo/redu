@@ -2,7 +2,7 @@ use std::collections::{hash_map, HashMap};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use directories::ProjectDirs;
-use rusqlite::{Connection, params, Transaction};
+use rusqlite::{Connection, params, Row, Transaction};
 use rusqlite::functions::FunctionFlags;
 use uuid::Uuid;
 
@@ -79,36 +79,42 @@ impl Cache {
     /// all snapshots.
     pub fn get_max_file_sizes(
         &self,
-        path: Option<&Utf8Path>,
-    ) -> Result<Vec<(Box<str>, usize)>, rusqlite::Error>
+        path: Option<impl AsRef<Utf8Path>>,
+    ) -> Result<Vec<(Utf8PathBuf, usize)>, rusqlite::Error>
     {
-        let (prefix, mut stmt, params) = match path {
+        let aux = |row: &Row| {
+            let child_path = {
+                let child_path: Utf8PathBuf = row.get::<&str, String>("path")?.into();
+                path.as_ref()
+                    .map(AsRef::as_ref)
+                    .clone()
+                    .map(|p| child_path.strip_prefix(p.as_std_path()).unwrap().into())
+                    .unwrap_or(child_path)
+            };
+            let size = row.get("size")?;
+            Ok((child_path, size))
+        };
+
+        match path {
             None => {
-                let stmt = self.conn.prepare(
+                let mut stmt = self.conn.prepare(
                     "SELECT path, max(size) as size \
                      FROM files \
                      WHERE path_parent(path) IS NULL \
                      GROUP BY path")?;
-                ("".to_owned(), stmt, params![])
+                let rows = stmt.query_and_then([], aux)?;
+                rows.collect()
             }
-            Some(path) => {
-                let stmt = self.conn.prepare(
+            Some(ref path) => {
+                let mut stmt = self.conn.prepare(
                     "SELECT path, max(size) as size \
                      FROM files \
                      WHERE path_parent(path) = ? \
                      GROUP BY path")?;
-                (path.to_string(), stmt, params![path.as_str()])
+                let rows = stmt.query_and_then([path.as_ref().as_str()], aux)?;
+                rows.collect()
             }
-        };
-        let rows = stmt
-            .query_and_then(params, |row| {
-                let path = row.get::<&str, String>("path")?
-                    .strip_prefix(&prefix)
-                    .unwrap()
-                    .into();
-                let size = row.get("size")?;
-                Ok((path, size)) })?;
-        rows.collect()
+        }
     }
 
     pub fn start_snapshot(

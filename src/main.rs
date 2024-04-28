@@ -2,7 +2,7 @@
 #![feature(try_blocks)]
 
 use std::cmp;
-
+use camino::{Utf8Path, Utf8PathBuf};
 use clap::{command, Parser};
 use crossterm::event::{Event, EventStream, KeyCode};
 use futures::TryStreamExt;
@@ -39,12 +39,12 @@ fn render<'a>(
     tui.draw(|frame| {
         let area = frame.size();
         let buf = frame.buffer_mut();
-        let items = state.files
+        let items = state.files()
             .iter()
             .enumerate()
             .map(|(index, (name, size))| {
                 let item = ListItem::new(format!("{name} : {size}"));
-                if Some(index) == state.selected {
+                if state.is_selected(index) {
                     item.black().on_white()
                 } else {
                     item
@@ -101,11 +101,10 @@ async fn main() {
     // UI
     let mut tui = Tui::new().unwrap();
     let mut terminal_events = EventStream::new();
-    let mut state = State {
-        path: Some("/".into()),
-        files: cache.get_max_file_sizes(Some("/".into())).unwrap(),
-        selected: None,
-    };
+    let mut state = State::new(
+        Some(Utf8Path::new("/")),
+        cache.get_max_file_sizes(Some("/")).unwrap(),
+    );
 
     render(&mut tui, &state).unwrap();
     while let Some(event) = terminal_events.try_next().await.unwrap() {
@@ -114,7 +113,43 @@ async fn main() {
                 KeyCode::Char('q') => break,
                 KeyCode::Down => state.move_selection(1),
                 KeyCode::Up => state.move_selection(-1),
+                KeyCode::Enter => {
+                    if let Some((name, _)) = state.selected_file() {
+                        let path = state.path()
+                            .map(Utf8PathBuf::from)
+                            .unwrap_or_default();
+                        let new_path = {
+                            let mut new_path = Utf8PathBuf::from(path);
+                            new_path.push(name);
+                            Some(new_path)
+                        };
+                        state.set_files(
+                            new_path.as_deref(),
+                            cache.get_max_file_sizes(new_path.as_deref()).unwrap()
+                        )
+                    }
+                },
+                KeyCode::Backspace => {
+                    let parent = state.path().and_then(|p| p
+                        .parent()
+                        .map(ToOwned::to_owned)
+                    );
+                    state.set_files(
+                        parent.clone(),
+                        cache.get_max_file_sizes(parent).unwrap()
+                    )
+                }
                 _ => {},
+            }
+            Event::Resize(_, h) => {
+                if let Some(selected) = state.selected() {
+                    let offset = state.offset as isize;
+                    let selected = selected as isize;
+                    let h = h as isize;
+                    state.offset += cmp::max(
+                        (selected - offset) - (offset + h - 3),
+                        0) as usize
+                }
             }
             _ => {}
         }
