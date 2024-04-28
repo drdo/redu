@@ -1,5 +1,7 @@
 use std::borrow::{Borrow, Cow};
+use std::cmp;
 use std::collections::HashMap;
+use std::io::Write;
 
 use camino::{Utf8Path, Utf8PathBuf};
 
@@ -57,6 +59,7 @@ impl Files {
 }
 
 pub struct State {
+    screen: (u16, u16),
     path: Option<Utf8PathBuf>,
     files: Vec<(Utf8PathBuf, usize)>,
     selected: Option<usize>,
@@ -72,10 +75,24 @@ impl State {
         P: Into<Cow<'a, Utf8Path>>,
     {
         State {
+            screen: (0, 0),
             path: path.map(|p| p.into().into_owned()),
             files,
             selected: None,
             offset: 0,
+        }
+    }
+
+    pub fn resize(&mut self, w: u16, h: u16) {
+        self.screen = (w, h);
+        if let Some(selected) = self.selected() {
+            let offset = self.offset as isize;
+            let selected = selected as isize;
+            let h = h as isize;
+            let last_visible = offset + h - 1;
+            let margin = cmp::max(0, cmp::min(h-1, 3));
+            let adjustment = cmp::max(0, selected - last_visible + margin);
+            self.offset += adjustment as usize;
         }
     }
 

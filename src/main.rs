@@ -45,6 +45,7 @@ fn render<'a>(
         let items = state.files()
             .iter()
             .enumerate()
+            .skip(state.offset)
             .map(|(index, (name, size))| {
                 let item = ListItem::new(
                     format!(
@@ -162,16 +163,7 @@ async fn main() {
                 }
                 _ => {},
             }
-            Event::Resize(_, h) => {
-                if let Some(selected) = state.selected() {
-                    let offset = state.offset as isize;
-                    let selected = selected as isize;
-                    let h = h as isize;
-                    state.offset += cmp::max(
-                        (selected - offset) - (offset + h - 3),
-                        0) as usize
-                }
-            }
+            Event::Resize(w, h) => state.resize(w, h),
             _ => {}
         }
         render(&mut terminal, &state).unwrap();
