@@ -94,17 +94,6 @@ async fn main() {
         eprintln!("Snapshots up to date");
     }
 
-    eprintln!("########## / ############");
-    for x in cache.get_max_file_sizes(Some("/".into())).unwrap() {
-        eprintln!("{}: {}", x.0, x.1);
-    }
-
-    eprintln!("########## None ############");
-    for x in cache.get_max_file_sizes(None).unwrap() {
-        eprintln!("{}: {}", x.0, x.1);
-    }
-    return;
-
     // UI
     let (action_tx, mut action_rx) = mpsc::channel(512);
     let mut tui = Tui::new().unwrap();
