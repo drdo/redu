@@ -46,7 +46,12 @@ fn render<'a>(
             .iter()
             .enumerate()
             .map(|(index, (name, size))| {
-                let item = ListItem::new(format!("{name} : {size}"));
+                let item = ListItem::new(
+                    format!(
+                        "{name} : {}",
+                        humansize::format_size(*size, humansize::BINARY),
+                    )
+                );
                 if state.is_selected(index) {
                     item.black().on_white()
                 } else {

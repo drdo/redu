@@ -11,6 +11,7 @@ crossterm = { version = "*", features = ["event-stream"] }
 directories = "5"
 env_logger = "*"
 futures = { version = "*" }
+humansize = "*"
 log = "*"
 nix = { version = "*", features = ["process"] }
 ratatui = { version = "*", features = ["unstable-widget-ref"] }
