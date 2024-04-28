@@ -89,6 +89,8 @@ impl State {
     {
         self.path = path.map(|p| p.into().into_owned());
         self.files = files;
+        self.selected = None;
+        self.offset = 0;
     }
     pub fn files(&self) -> &[(Utf8PathBuf, usize)] {
         &self.files
