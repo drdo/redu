@@ -1,7 +1,6 @@
 use std::borrow::{Borrow, Cow};
 use std::cmp;
 use std::collections::HashMap;
-use std::io::Write;
 
 use camino::{Utf8Path, Utf8PathBuf};
 

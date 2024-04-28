@@ -2,7 +2,7 @@
 #![feature(panic_update_hook)]
 #![feature(try_blocks)]
 
-use std::{cmp, panic};
+use std::panic;
 use std::io::stdout;
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{command, Parser};
