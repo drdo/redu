@@ -170,4 +170,5 @@ async fn main() {
         }
         render(&mut terminal, &state).unwrap();
     }
+    disable_raw_mode().unwrap();
 }
