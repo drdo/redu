@@ -138,10 +138,11 @@ async fn main() {
                             new_path.push(name);
                             Some(new_path)
                         };
-                        state.set_files(
-                            new_path.as_deref(),
-                            cache.get_max_file_sizes(new_path.as_deref()).unwrap()
-                        )
+                        let files = cache
+                            .get_max_file_sizes(new_path.as_deref()).unwrap();
+                        if ! files.is_empty() {
+                            state.set_files(new_path.as_deref(), files)
+                        }
                     }
                 },
                 KeyCode::Backspace => {
@@ -170,5 +171,7 @@ async fn main() {
         }
         render(&mut terminal, &state).unwrap();
     }
+
     disable_raw_mode().unwrap();
+    stdout().execute(LeaveAlternateScreen).unwrap();
 }
