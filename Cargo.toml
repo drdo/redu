@@ -15,7 +15,6 @@ log = "*"
 nix = { version = "*", features = ["process"] }
 ratatui = { version = "*", features = ["unstable-widget-ref"] }
 rusqlite = { version = "*", features = ["functions", "trace"] }
-scopeguard = "*"
 serde = { version = "*", features = ["derive"] }
 serde_json = "*"
 tokio = { version = "*", features = ["macros", "io-std", "io-util", "process", "rt-multi-thread", "rt"] }
