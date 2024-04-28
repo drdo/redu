@@ -67,6 +67,8 @@ pub struct State {
 
 impl State {
     pub fn new<'a, P>(
+        width: u16,
+        height: u16,
         path: Option<P>,
         files: Vec<(Utf8PathBuf, usize)>,
     ) -> Self
@@ -74,7 +76,7 @@ impl State {
         P: Into<Cow<'a, Utf8Path>>,
     {
         State {
-            screen: (0, 0),
+            screen: (width, height),
             path: path.map(|p| p.into().into_owned()),
             files,
             selected: None,
@@ -82,17 +84,28 @@ impl State {
         }
     }
 
-    pub fn resize(&mut self, w: u16, h: u16) {
-        self.screen = (w, h);
+    fn fix_selected_visibility(&mut self) {
         if let Some(selected) = self.selected() {
             let offset = self.offset as isize;
             let selected = selected as isize;
-            let h = h as isize;
+            let h = self.screen.1 as isize;
+            let first_visible = offset;
             let last_visible = offset + h - 1;
-            let margin = cmp::max(0, cmp::min(h-1, 3));
-            let adjustment = cmp::max(0, selected - last_visible + margin);
-            self.offset += adjustment as usize;
+            let new_offset =
+                if selected < first_visible {
+                    selected
+                } else if last_visible < selected {
+                     selected - h + 1
+                } else {
+                    offset
+                };
+            self.offset = new_offset as usize;
         }
+    }
+
+    pub fn resize(&mut self, w: u16, h: u16) {
+        self.screen = (w, h);
+        self.fix_selected_visibility()
     }
 
     pub fn set_files<'a, P>(
@@ -147,5 +160,6 @@ impl State {
             Some(selected) => selected as isize + delta
         };
         self.selected = Some(new_index.rem_euclid(len as isize) as usize);
+        self.fix_selected_visibility();
     }
 }

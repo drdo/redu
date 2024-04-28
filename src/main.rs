@@ -122,11 +122,15 @@ async fn main() {
     terminal.clear().unwrap();
 
     let mut terminal_events = EventStream::new();
-    let mut state = State::new(
-        Some(Utf8Path::new("/")),
-        cache.get_max_file_sizes(Some("/")).unwrap(),
-    );
-
+    let mut state = {
+        let rect = terminal.size().unwrap();
+        State::new(
+            rect.width,
+            rect.height,
+            Some(Utf8Path::new("/")),
+            cache.get_max_file_sizes(Some("/")).unwrap(),
+        )
+    };
     render(&mut terminal, &state).unwrap();
     while let Some(event) = terminal_events.try_next().await.unwrap() {
         match event {
