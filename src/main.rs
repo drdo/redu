@@ -43,24 +43,60 @@ fn render<'a>(
         let area = frame.size();
         let buf = frame.buffer_mut();
         let items = state.files()
-            .iter()
-            .enumerate()
-            .skip(state.offset)
-            .map(|(index, (name, size))| {
-                let item = ListItem::new(
-                    format!(
-                        "{name} : {}",
-                        humansize::format_size(*size, humansize::BINARY),
-                    )
-                );
-                if state.is_selected(index) {
-                    item.black().on_white()
-                } else {
-                    item
-                }
-            });
+        .iter()
+        .enumerate()
+        .skip(state.offset)
+        .map(|(index, (name, size))| {
+            let item = ListItem::new(
+                format!(
+                    "{name} : {}",
+                    humansize::format_size(*size, humansize::BINARY),
+                )
+            );
+            if state.is_selected(index) {
+                item.black().on_white()
+            } else {
+                item
+            }
+        });
         List::new(items).render(area, buf);
     })
+}
+
+fn handle_down(state: &mut State) {
+    state.move_selection(1);
+}
+
+fn handle_up(state: &mut State) {
+    state.move_selection(-1);
+}
+
+fn handle_left(cache: &Cache, state: &mut State) {
+    let parent = state.path().and_then(|p| p
+        .parent()
+        .map(ToOwned::to_owned)
+    );
+    state.set_files(
+        parent.clone(),
+        cache.get_max_file_sizes(parent).unwrap()
+    )
+}
+fn handle_right(cache: &Cache, state: &mut State) {
+    if let Some((name, _)) = state.selected_file() {
+        let path = state.path()
+            .map(Utf8PathBuf::from)
+            .unwrap_or_default();
+        let new_path = {
+            let mut new_path = Utf8PathBuf::from(path);
+            new_path.push(name);
+            Some(new_path)
+        };
+        let files = cache
+            .get_max_file_sizes(new_path.as_deref()).unwrap();
+        if ! files.is_empty() {
+            state.set_files(new_path.as_deref(), files)
+        }
+    }
 }
 
 #[tokio::main]
@@ -71,14 +107,14 @@ async fn main() {
     eprintln!("Getting restic config");
     let repo_id = restic.config().await.0.unwrap().id;
     let mut cache = Cache::open(repo_id.as_str()).unwrap();
-
+    
     eprintln!("Using cache file '{}'", cache.filename());
-
+    
     // Figure out what snapshots we need to update
     let snapshots: Vec<Snapshot> = {
         eprintln!("Fetching restic snapshot list");
         let restic_snapshots = restic.snapshots().await.0.unwrap();
-
+        
         // Delete snapshots from the DB that were deleted on Restic
         for snapshot in cache.get_snapshots().unwrap() {
             if ! restic_snapshots.contains(&snapshot) {
@@ -86,11 +122,11 @@ async fn main() {
                 cache.delete_snapshot(&snapshot.id).unwrap();
             }
         }
-
+        
         let db_snapshots = cache.get_snapshots().unwrap();
         restic_snapshots.into_iter().filter(|s| ! db_snapshots.contains(s)).collect()
     };
-
+    
     // Update snapshots
     if snapshots.len() > 0 {
         eprintln!("Need to fetch {} snapshot(s)", snapshots.len());
@@ -106,7 +142,7 @@ async fn main() {
     } else {
         eprintln!("Snapshots up to date");
     }
-
+    
     // UI
     stdout().execute(EnterAlternateScreen).unwrap();
     panic::update_hook(|prev, info| {
@@ -120,7 +156,7 @@ async fn main() {
     });
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout())).unwrap();
     terminal.clear().unwrap();
-
+    
     let mut terminal_events = EventStream::new();
     let mut state = {
         let rect = terminal.size().unwrap();
@@ -136,35 +172,15 @@ async fn main() {
         match event {
             Event::Key(k) => match k.code {
                 KeyCode::Char('q') => break,
-                KeyCode::Down => state.move_selection(1),
-                KeyCode::Up => state.move_selection(-1),
-                KeyCode::Enter => {
-                    if let Some((name, _)) = state.selected_file() {
-                        let path = state.path()
-                            .map(Utf8PathBuf::from)
-                            .unwrap_or_default();
-                        let new_path = {
-                            let mut new_path = Utf8PathBuf::from(path);
-                            new_path.push(name);
-                            Some(new_path)
-                        };
-                        let files = cache
-                            .get_max_file_sizes(new_path.as_deref()).unwrap();
-                        if ! files.is_empty() {
-                            state.set_files(new_path.as_deref(), files)
-                        }
-                    }
-                },
-                KeyCode::Backspace => {
-                    let parent = state.path().and_then(|p| p
-                        .parent()
-                        .map(ToOwned::to_owned)
-                    );
-                    state.set_files(
-                        parent.clone(),
-                        cache.get_max_file_sizes(parent).unwrap()
-                    )
-                }
+                KeyCode::Down => handle_down(&mut state),
+                KeyCode::Char('j') => handle_down(&mut state),
+                KeyCode::Up => handle_up(&mut state),
+                KeyCode::Char('k') => handle_up(&mut state),
+                KeyCode::Right => handle_right(&cache, &mut state),
+                KeyCode::Char(';') => handle_right(&cache, &mut state),
+                KeyCode::Enter => handle_right(&cache, &mut state),
+                KeyCode::Left => handle_left(&cache, &mut state),
+                KeyCode::Char('h') => handle_left(&cache, &mut state),
                 _ => {},
             }
             Event::Resize(w, h) => state.resize(w, h),
@@ -172,7 +188,7 @@ async fn main() {
         }
         render(&mut terminal, &state).unwrap();
     }
-
+    
     disable_raw_mode().unwrap();
     stdout().execute(LeaveAlternateScreen).unwrap();
 }
