@@ -76,10 +76,10 @@ impl State {
     {
         State {
             screen: (width, height),
+            selected: if files.is_empty() { None } else { Some(0) },
+            offset: 0,
             path: path.map(|p| p.into().into_owned()),
             files,
-            selected: None,
-            offset: 0,
         }
     }
 
@@ -115,10 +115,10 @@ impl State {
     where
         P: Into<Cow<'a, Utf8Path>>,
     {
+        self.selected = if files.is_empty() { None } else { Some(0) };
+        self.offset = 0;
         self.path = path.map(|p| p.into().into_owned());
         self.files = files;
-        self.selected = None;
-        self.offset = 0;
     }
     pub fn files(&self) -> &[(Utf8PathBuf, usize)] {
         &self.files
