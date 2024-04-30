@@ -3,6 +3,7 @@
 #![feature(try_blocks)]
 #![feature(option_get_or_insert_default)]
 
+use std::borrow::Cow;
 use std::io::stdout;
 use std::panic;
 
@@ -145,7 +146,7 @@ async fn main() {
         let rect = terminal.size().unwrap();
         App::new(
             (rect.width, rect.height),
-            Some(Utf8Path::new("/")),
+            None::<Cow<Utf8Path>>,
             get_files(&cache, None).unwrap(),
         )
     };
