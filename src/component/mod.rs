@@ -1,6 +1,8 @@
 mod list;
 pub mod app;
+mod heading;
 
+#[derive(Debug)]
 pub enum Event {
     Resize(u16, u16),
     Left,
@@ -10,6 +12,7 @@ pub enum Event {
     Quit,
 }
 
+#[derive(Debug)]
 pub enum Action {
     Nothing,
     Render,
