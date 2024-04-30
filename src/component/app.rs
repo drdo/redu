@@ -22,9 +22,9 @@ impl Display for PathItem {
     }
 }
 
-pub struct FileItem {
-    pub name: Utf8PathBuf,
-    pub size: usize,
+struct FileItem {
+    name: Utf8PathBuf,
+    size: usize,
 }
 
 impl Display for FileItem {
@@ -43,10 +43,11 @@ pub struct App {
 }
 
 impl App {
+    /// `files` is expected to be sorted by size, largest first.
     pub fn new<'a, P>(
         dimensions: (u16, u16),
         path: Option<P>,
-        files: Vec<FileItem>,
+        files: Vec<(Utf8PathBuf, usize)>,
     ) -> Self
     where
         P: Into<Cow<'a, Utf8Path>>,
@@ -59,16 +60,19 @@ impl App {
                 x: 0, y: 0,
                 width: dimensions.0, height: dimensions.1
             });
-            List::new(layout[1].height, files, true)
+            List::new(layout[1].height, to_fileitems(files), true)
         };
         App { heading, list }
     }
 
-    pub fn handle_event<E>(
+    /// The result of `get_files` is expected to be sorted by size, largest first.
+    pub fn handle_event<E, G>(
         &mut self,
-        get_files: impl FnOnce(Option<&Utf8Path>) -> Result<Vec<FileItem>, E>,
+        get_files: G,
         event: Event,
     ) -> Result<Action, E>
+    where
+        G: FnOnce(Option<&Utf8Path>) -> Result<Vec<(Utf8PathBuf, usize)>, E>,
     {
         log::debug!("received {:?}", event);
         use Event::*;
@@ -76,7 +80,7 @@ impl App {
             Quit => Ok(Action::Quit),
             Left => {
                 path_pop(&mut self.heading);
-                self.list.set_items(get_files(self.path())?);
+                self.list.set_items(to_fileitems(get_files(self.path())?));
                 log::debug!("path is now {:?}", self.path());
                 Ok(Action::Render)
             },
@@ -85,7 +89,7 @@ impl App {
                     path_push(&mut self.heading, name);
                     let files = get_files(self.path().as_deref())?;
                     if ! files.is_empty() {
-                        self.list.set_items(files);
+                        self.list.set_items(to_fileitems(files));
                         return Ok(Action::Render);
                     }
                 }
@@ -111,6 +115,17 @@ impl WidgetRef for App {
         self.heading.render_ref(layout[0], buf);
         self.list.render_ref(layout[1], buf);
     }
+}
+
+/// `files` is expected to be sorted by size, largest first.
+fn to_fileitems(files: Vec<(Utf8PathBuf, usize)>) -> Vec<FileItem> {
+    files
+        .into_iter()
+        .map(|(name, size)| FileItem {
+            name,
+            size,
+        })
+        .collect()
 }
 
 fn compute_layout(area: Rect) -> Rc<[Rect]> {

@@ -7,7 +7,7 @@ use std::borrow::Cow;
 use std::io::stdout;
 use std::panic;
 
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
 use clap::{command, Parser};
 use crossterm::event::KeyCode;
 use crossterm::ExecutableCommand;
@@ -24,7 +24,6 @@ use crate::cache::Cache;
 use crate::restic::Restic;
 use crate::types::Snapshot;
 use crate::component::{Action, Event};
-use crate::component::app::FileItem;
 
 mod cache;
 mod restic;
@@ -44,12 +43,9 @@ struct Cli {
 fn get_files(
     cache: &Cache,
     path: Option<&Utf8Path>,
-) -> Result<Vec<FileItem>, rusqlite::Error>
+) -> Result<Vec<(Utf8PathBuf, usize)>, rusqlite::Error>
 {
-    Ok(cache.get_max_file_sizes(path)?
-        .into_iter()
-        .map(|(name, size)| FileItem { name, size })
-        .collect())
+    cache.get_max_file_sizes(path)
 }
 
 fn render<'a>(
@@ -69,12 +65,7 @@ fn handle_event(
     event: Event,
 ) -> Result<Action, rusqlite::Error>
 {
-    let get_files = |path: Option<&Utf8Path>| Ok(cache
-        .get_max_file_sizes(path)?
-        .into_iter()
-        .map(|(name, size)| FileItem { name, size })
-        .collect());
-    app.handle_event(get_files, event)
+    app.handle_event(|path| get_files(cache, path), event)
 }
 
 #[tokio::main]
