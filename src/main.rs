@@ -1,29 +1,33 @@
 #![feature(iter_intersperse)]
 #![feature(panic_update_hook)]
 #![feature(try_blocks)]
+#![feature(option_get_or_insert_default)]
 
-use std::panic;
 use std::io::stdout;
-use camino::{Utf8Path, Utf8PathBuf};
+use std::panic;
+
+use camino::Utf8Path;
 use clap::{command, Parser};
-use crossterm::event::{Event, EventStream, KeyCode};
+use crossterm::event::KeyCode;
 use crossterm::ExecutableCommand;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use futures::TryStreamExt;
 use ratatui::{CompletedFrame, Terminal};
 use ratatui::backend::{Backend, CrosstermBackend};
-use ratatui::style::Stylize;
-use ratatui::widgets::{List, ListItem, Widget};
+use ratatui::widgets::WidgetRef;
+
+use widget::app::App;
 
 use crate::cache::Cache;
 use crate::restic::Restic;
-use crate::state::State;
 use crate::types::Snapshot;
+use crate::widget::{Action, Event};
+use crate::widget::app::FileItem;
 
 mod cache;
 mod restic;
 mod types;
-mod state;
+mod widget;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -34,69 +38,41 @@ struct Cli {
     password_command: Option<String>,
 }
 
+
+fn get_files(
+    cache: &Cache,
+    path: Option<&Utf8Path>,
+) -> Result<Vec<FileItem>, rusqlite::Error>
+{
+    Ok(cache.get_max_file_sizes(path)?
+        .into_iter()
+        .map(|(name, size)| FileItem { name, size })
+        .collect())
+}
+
 fn render<'a>(
     terminal: &'a mut Terminal<impl Backend>,
-    state: &'_ State,
-) -> std::io::Result<CompletedFrame<'a>>
-{
+    app: &App,
+) -> std::io::Result<CompletedFrame<'a>> {
     terminal.draw(|frame| {
         let area = frame.size();
         let buf = frame.buffer_mut();
-        let items = state.files()
-        .iter()
-        .enumerate()
-        .skip(state.offset)
-        .map(|(index, (name, size))| {
-            let item = ListItem::new(
-                format!(
-                    "{name} : {}",
-                    humansize::format_size(*size, humansize::BINARY),
-                )
-            );
-            if state.is_selected(index) {
-                item.black().on_white()
-            } else {
-                item
-            }
-        });
-        List::new(items).render(area, buf);
+        app.render_ref(area, buf)
     })
 }
 
-fn handle_down(state: &mut State) {
-    state.move_selection(1);
-}
-
-fn handle_up(state: &mut State) {
-    state.move_selection(-1);
-}
-
-fn handle_left(cache: &Cache, state: &mut State) {
-    let parent = state.path().and_then(|p| p
-        .parent()
-        .map(ToOwned::to_owned)
-    );
-    state.set_files(
-        parent.clone(),
-        cache.get_max_file_sizes(parent).unwrap()
-    )
-}
-fn handle_right(cache: &Cache, state: &mut State) {
-    if let Some((name, _)) = state.selected_file() {
-        let path = state.path()
-            .map(Utf8PathBuf::from)
-            .unwrap_or_default();
-        let new_path = {
-            let mut new_path = Utf8PathBuf::from(path);
-            new_path.push(name);
-            Some(new_path)
-        };
-        let files = cache
-            .get_max_file_sizes(new_path.as_deref()).unwrap();
-        if ! files.is_empty() {
-            state.set_files(new_path.as_deref(), files)
-        }
-    }
+fn handle_event(
+    cache: &Cache,
+    app: &mut App,
+    event: Event,
+) -> Result<Action, rusqlite::Error>
+{
+    let get_files = |path: Option<&Utf8Path>| Ok(cache
+        .get_max_file_sizes(path)?
+        .into_iter()
+        .map(|(name, size)| FileItem { name, size })
+        .collect());
+    app.handle_event(get_files, event)
 }
 
 #[tokio::main]
@@ -112,7 +88,7 @@ async fn main() {
     
     // Figure out what snapshots we need to update
     let snapshots: Vec<Snapshot> = {
-        eprintln!("Fetching restic snapshot list");
+        eprintln!("Fetching restic snapshot widget");
         let restic_snapshots = restic.snapshots().await.0.unwrap();
         
         // Delete snapshots from the DB that were deleted on Restic
@@ -157,36 +133,41 @@ async fn main() {
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout())).unwrap();
     terminal.clear().unwrap();
     
-    let mut terminal_events = EventStream::new();
-    let mut state = {
+    let mut terminal_events = crossterm::event::EventStream::new();
+    let mut app = {
         let rect = terminal.size().unwrap();
-        State::new(
-            rect.width,
-            rect.height,
+        App::new(
+            (rect.width, rect.height),
             Some(Utf8Path::new("/")),
-            cache.get_max_file_sizes(Some("/")).unwrap(),
+            get_files(&cache, None).unwrap(),
         )
     };
-    render(&mut terminal, &state).unwrap();
+    render(&mut terminal, &app).unwrap();
     while let Some(event) = terminal_events.try_next().await.unwrap() {
-        match event {
-            Event::Key(k) => match k.code {
-                KeyCode::Char('q') => break,
-                KeyCode::Down => handle_down(&mut state),
-                KeyCode::Char('j') => handle_down(&mut state),
-                KeyCode::Up => handle_up(&mut state),
-                KeyCode::Char('k') => handle_up(&mut state),
-                KeyCode::Right => handle_right(&cache, &mut state),
-                KeyCode::Char(';') => handle_right(&cache, &mut state),
-                KeyCode::Enter => handle_right(&cache, &mut state),
-                KeyCode::Left => handle_left(&cache, &mut state),
-                KeyCode::Char('h') => handle_left(&cache, &mut state),
-                _ => {},
+        let event = match event {
+            crossterm::event::Event::Key(k) => match k.code {
+                KeyCode::Char('q') => Some(Event::Quit),
+                KeyCode::Down => Some(Event::Down),
+                KeyCode::Char('j') => Some(Event::Down),
+                KeyCode::Up => Some(Event::Up),
+                KeyCode::Char('k') => Some(Event::Up),
+                KeyCode::Right => Some(Event::Right),
+                KeyCode::Char(';') => Some(Event::Right),
+                KeyCode::Enter => Some(Event::Right),
+                KeyCode::Left => Some(Event::Left),
+                KeyCode::Char('h') => Some(Event::Left),
+                _ => None,
             }
-            Event::Resize(w, h) => state.resize(w, h),
-            _ => {}
+            crossterm::event::Event::Resize(w, h) => Some(Event::Resize(w, h)),
+            _ => None,
+        };
+        if let Some(event) = event {
+            match handle_event(&cache, &mut app, event).unwrap() {
+                Action::Quit => break,
+                Action::Render => { render(&mut terminal, &app).unwrap(); },
+                Action::Nothing => {},
+            }
         }
-        render(&mut terminal, &state).unwrap();
     }
     
     disable_raw_mode().unwrap();
