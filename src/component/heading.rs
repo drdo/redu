@@ -17,9 +17,8 @@ impl<T: Display> WidgetRef for Heading<T> {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         let text = {
             let item_str = self.item.to_string();
-            format!("--- {item_str} {:-^width$}",
-                    "",
-                    width = area.width as usize - 4 - item_str.len())
+            let width = (area.width as isize - 4 - item_str.len() as isize) as usize;
+            format!("--- {item_str} {:-^width$}", "", width = width)
         };
         Paragraph::new(text).render_ref(area, buf);
     }
