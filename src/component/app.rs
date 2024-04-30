@@ -31,8 +31,8 @@ impl Display for FileItem {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!(
             "{} : {}",
-            self.name,
             humansize::format_size(self.size, humansize::BINARY),
+            self.name,
         ))
     }
 }
