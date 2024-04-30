@@ -25,14 +25,20 @@ impl Display for PathItem {
 struct FileItem {
     name: Utf8PathBuf,
     size: usize,
+    relative_size: f64,
 }
 
 impl Display for FileItem {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        const MAX_BAR_SIZE: usize = 24;
+        let bar_size = (self.relative_size * MAX_BAR_SIZE as f64) as usize;
         f.write_fmt(format_args!(
-            "{} : {}",
+            " {:>10} [{:#^bar_size$}{:empty_bar_size$}] {}",
             humansize::format_size(self.size, humansize::BINARY),
+            "", "",
             self.name,
+            bar_size = bar_size,
+            empty_bar_size = MAX_BAR_SIZE - bar_size,
         ))
     }
 }
@@ -119,11 +125,15 @@ impl WidgetRef for App {
 
 /// `files` is expected to be sorted by size, largest first.
 fn to_fileitems(files: Vec<(Utf8PathBuf, usize)>) -> Vec<FileItem> {
+    if files.is_empty() { return Vec::new() }
+
+    let largest = files[0].1 as f64;
     files
         .into_iter()
         .map(|(name, size)| FileItem {
             name,
             size,
+            relative_size: size as f64 / largest
         })
         .collect()
 }
