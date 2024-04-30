@@ -7,7 +7,7 @@ use ratatui::prelude::Widget;
 use ratatui::style::Stylize;
 use ratatui::widgets::{ListItem, WidgetRef};
 
-use crate::widget::{Action, Event};
+use crate::component::{Action, Event};
 
 pub struct List<T> {
     height: u16,

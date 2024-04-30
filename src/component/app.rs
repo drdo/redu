@@ -6,8 +6,8 @@ use camino::{Utf8Path, Utf8PathBuf};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::widgets::WidgetRef;
-use crate::widget::{Action, Event};
-use crate::widget::list::List;
+use crate::component::{Action, Event};
+use crate::component::list::List;
 
 pub struct FileItem {
     pub name: Utf8PathBuf,

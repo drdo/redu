@@ -16,18 +16,18 @@ use ratatui::{CompletedFrame, Terminal};
 use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::widgets::WidgetRef;
 
-use widget::app::App;
+use component::app::App;
 
 use crate::cache::Cache;
 use crate::restic::Restic;
 use crate::types::Snapshot;
-use crate::widget::{Action, Event};
-use crate::widget::app::FileItem;
+use crate::component::{Action, Event};
+use crate::component::app::FileItem;
 
 mod cache;
 mod restic;
 mod types;
-mod widget;
+mod component;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -88,7 +88,7 @@ async fn main() {
     
     // Figure out what snapshots we need to update
     let snapshots: Vec<Snapshot> = {
-        eprintln!("Fetching restic snapshot widget");
+        eprintln!("Fetching restic snapshot list");
         let restic_snapshots = restic.snapshots().await.0.unwrap();
         
         // Delete snapshots from the DB that were deleted on Restic
