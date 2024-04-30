@@ -70,12 +70,14 @@ impl App {
         event: Event,
     ) -> Result<Action, E>
     {
+        log::debug!("received {:?}", event);
         use Event::*;
         match event {
             Quit => Ok(Action::Quit),
             Left => {
                 path_pop(&mut self.heading);
                 self.list.set_items(get_files(self.path())?);
+                log::debug!("path is now {:?}", self.path());
                 Ok(Action::Render)
             },
             Right => {

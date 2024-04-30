@@ -9,7 +9,7 @@ chrono = "*"
 clap = { version = "*", features = ["derive"] }
 crossterm = { version = "*", features = ["event-stream"] }
 directories = "5"
-env_logger = "*"
+flexi_logger = "*"
 futures = { version = "*" }
 humansize = "*"
 log = "*"

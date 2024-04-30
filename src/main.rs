@@ -11,6 +11,7 @@ use clap::{command, Parser};
 use crossterm::event::KeyCode;
 use crossterm::ExecutableCommand;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
+use flexi_logger::{FileSpec, Logger, WriteMode};
 use futures::TryStreamExt;
 use ratatui::{CompletedFrame, Terminal};
 use ratatui::backend::{Backend, CrosstermBackend};
@@ -77,7 +78,13 @@ fn handle_event(
 
 #[tokio::main]
 async fn main() {
-    env_logger::init();
+    let _logger = Logger::try_with_str("debug")
+        .unwrap()
+        .log_to_file(FileSpec::default())
+        .write_mode(WriteMode::Direct)
+        .start()
+        .unwrap();
+
     let cli = Cli::parse();
     let restic = Restic::new(&cli.repo, cli.password_command.as_ref().map(|s| s.as_str()));
     eprintln!("Getting restic config");
