@@ -32,8 +32,8 @@ struct FileItem {
     relative_size: f64,
 }
 
-impl ToLine for FileItem {
-    fn to_line(&self, width: u16) -> Line {
+impl FileItem {
+    fn to_line_string(&self, width: u16) -> String {
         let mut text =
             format!(" {:>10}", humansize::format_size(self.size, humansize::BINARY));
         { // Bar
@@ -47,10 +47,17 @@ impl ToLine for FileItem {
             );
             text.push_str(&bar);
         }
-        text.push_str(
-            shorten_to(self.name.as_str(), width as usize - text.len()).as_ref()
-        );
-        Line::raw(text)
+        {
+            let available_width = max(0, width as isize - text.len() as isize) as usize;
+            text.push_str(shorten_to(self.name.as_str(), available_width).as_ref());
+        }
+        text
+    }
+}
+
+impl ToLine for FileItem {
+    fn to_line(&self, width: u16) -> Line {
+        Line::raw(self.to_line_string(width))
     }
 }
 
@@ -230,5 +237,22 @@ mod tests {
         assert_eq!(shorten_to(s, 5), Cow::Owned::<str>("1...9".to_owned()));
         assert_eq!(shorten_to(s, 8), Cow::Owned::<str>("12...789".to_owned()));
         assert_eq!(shorten_to(s, 9), Cow::Owned::<str>("123456789".to_owned()));
+    }
+
+    #[test]
+    fn fileitem_to_line() {
+        let f = FileItem {
+            name: "1234567890123456789012345678901234567890".into(),
+            size: 999 * 1024 + 1010,
+            relative_size: 0.9,
+        };
+        assert_eq!(
+            f.to_line_string(80),
+            " 999.99 KiB [##############  ] 1234567890123456789012345678901234567890".to_owned()
+        );
+        assert_eq!(
+            f.to_line_string(2),
+            " 999.99 KiB [##############  ] ".to_owned()
+        );
     }
 }
