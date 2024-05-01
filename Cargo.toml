@@ -20,6 +20,7 @@ serde = { version = "*", features = ["derive"] }
 serde_json = "*"
 tokio = { version = "*", features = ["macros", "io-std", "io-util", "process", "rt-multi-thread", "rt"] }
 tokio-util = { version = "*", features = ["codec"] }
+unicode-segmentation = "*"
 uuid = { version = "*", features = ["v4"] }
 
 [profile.release]
