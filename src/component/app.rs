@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::cmp::{max, min};
 use std::fmt::{Display, Formatter};
 use std::rc::Rc;
 
@@ -31,15 +32,18 @@ struct FileItem {
 
 impl ToLine for FileItem {
     fn to_line(&self, width: u16) -> Line {
-        const MAX_BAR_SIZE: usize = 24;
-        let bar_size = (self.relative_size * MAX_BAR_SIZE as f64) as usize;
-        Line::raw(format!(
-            " {:>10} [{:#^bar_size$}{:empty_bar_size$}] {}",
+        let bar = {
+            let max_bar_size: usize = max(16, min(24, (0.1 * width as f64) as usize));
+            let bar_size = (self.relative_size * max_bar_size as f64) as usize;
+            format!("[{:#^bar_size$}{:empty_bar_size$}]",
+                "", "",
+                bar_size = bar_size,
+                empty_bar_size = max_bar_size - bar_size)
+        };
+        Line::raw(format!(" {:>10} {} {}",
             humansize::format_size(self.size, humansize::BINARY),
-            "", "",
+            bar,
             self.name,
-            bar_size = bar_size,
-            empty_bar_size = MAX_BAR_SIZE - bar_size,
         ))
     }
 }
