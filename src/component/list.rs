@@ -1,5 +1,4 @@
 use std::cmp;
-use std::fmt::Display;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -7,7 +6,7 @@ use ratatui::prelude::Widget;
 use ratatui::style::Stylize;
 use ratatui::widgets::{ListItem, WidgetRef};
 
-use crate::component::{Action, Event};
+use crate::component::{Action, Event, ToLine};
 
 pub struct List<T> {
     height: u16,
@@ -97,13 +96,13 @@ impl<T> List<T> {
 
 }
 
-impl<T: Display> WidgetRef for List<T> {
+impl<T: ToLine> WidgetRef for List<T> {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         let items = self.items[self.offset..]
             .iter()
             .enumerate()
             .map(|(index, item)| {
-                let item = ListItem::new(item.to_string());
+                let item = ListItem::new(item.to_line(area.width));
                 if index == self.selected && self.focused {
                     item.black().on_white()
                 } else {

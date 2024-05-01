@@ -5,9 +5,10 @@ use std::rc::Rc;
 use camino::{Utf8Path, Utf8PathBuf};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::prelude::Line;
 use ratatui::widgets::WidgetRef;
 
-use crate::component::{Action, Event};
+use crate::component::{Action, Event, ToLine};
 use crate::component::heading::Heading;
 use crate::component::list::List;
 
@@ -28,11 +29,11 @@ struct FileItem {
     relative_size: f64,
 }
 
-impl Display for FileItem {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl ToLine for FileItem {
+    fn to_line(&self, width: u16) -> Line {
         const MAX_BAR_SIZE: usize = 24;
         let bar_size = (self.relative_size * MAX_BAR_SIZE as f64) as usize;
-        f.write_fmt(format_args!(
+        Line::raw(format!(
             " {:>10} [{:#^bar_size$}{:empty_bar_size$}] {}",
             humansize::format_size(self.size, humansize::BINARY),
             "", "",

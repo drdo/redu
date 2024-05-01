@@ -1,3 +1,5 @@
+use ratatui::text::Line;
+
 mod list;
 pub mod app;
 mod heading;
@@ -17,4 +19,8 @@ pub enum Action {
     Nothing,
     Render,
     Quit,
+}
+
+trait ToLine {
+    fn to_line(&self, width: u16) -> Line;
 }
