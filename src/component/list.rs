@@ -99,10 +99,9 @@ impl<T> List<T> {
 
 impl<T: Display> WidgetRef for List<T> {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
-        let items = self.items
+        let items = self.items[self.offset..]
             .iter()
             .enumerate()
-            .skip(self.offset)
             .map(|(index, item)| {
                 let item = ListItem::new(item.to_string());
                 if index == self.selected && self.focused {
