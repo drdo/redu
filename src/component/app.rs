@@ -63,7 +63,7 @@ impl ToLine for FileItem {
 
 pub struct App {
     heading: Heading<PathItem>,
-    list: List<FileItem>,
+    files: List<FileItem>,
 }
 
 impl App {
@@ -86,7 +86,7 @@ impl App {
             });
             List::new(layout[1].height, to_fileitems(files), true)
         };
-        App { heading, list }
+        App { heading, files: list }
     }
 
     /// The result of `get_files` is expected to be sorted by size, largest first.
@@ -100,31 +100,52 @@ impl App {
     {
         log::debug!("received {:?}", event);
         use Event::*;
+        use crossterm::event::KeyCode::*;
         match event {
-            Quit => Ok(Action::Quit),
-            Left => {
-                path_pop(&mut self.heading);
-                self.list.set_items(to_fileitems(get_files(self.path())?));
-                log::debug!("path is now {:?}", self.path());
-                Ok(Action::Render)
-            },
-            Right => {
-                if let Some(FileItem{name, ..}) = self.list.selected_item() {
-                    path_push(&mut self.heading, name);
-                    let files = get_files(self.path().as_deref())?;
-                    if ! files.is_empty() {
-                        self.list.set_items(to_fileitems(files));
-                        return Ok(Action::Render);
-                    }
-                }
-                Ok(Action::Nothing)
-            }
-            Resize(w, h) => {
-                let layout = compute_dimensions((w, h));
-                Ok(self.list.handle_event(Resize(layout[1].0, layout[1].1)))
-            }
-            e => Ok(self.list.handle_event(e)),
+            Resize(w, h) => Ok(self.handle_resize(w, h)),
+            KeyPress(Char('q')) => Ok(Action::Quit),
+            KeyPress(Right) => self.handle_right(get_files),
+            KeyPress(Char(';')) => self.handle_right(get_files),
+            KeyPress(Left) => self.handle_left(get_files),
+            KeyPress(Char('h')) => self.handle_left(get_files),
+            event => Ok(self.files.handle_event(event)),
         }
+    }
+
+    fn handle_resize(&mut self, w: u16, h: u16) -> Action {
+        let layout = compute_dimensions((w, h));
+        self.files.handle_event(Event::Resize(layout[1].0, layout[1].1))
+    }
+
+    fn handle_left<E, G>(
+        &mut self,
+        get_files: G,
+    ) -> Result<Action, E>
+    where
+        G: FnOnce(Option<&Utf8Path>) -> Result<Vec<(Utf8PathBuf, usize)>, E>,
+    {
+        path_pop(&mut self.heading);
+        self.files.set_items(to_fileitems(get_files(self.path())?));
+        log::debug!("path is now {:?}", self.path());
+        Ok(Action::Render)
+    }
+
+    fn handle_right<E, G>(
+        &mut self,
+        get_files: G,
+    ) -> Result<Action, E>
+        where
+            G: FnOnce(Option<&Utf8Path>) -> Result<Vec<(Utf8PathBuf, usize)>, E>,
+    {
+        if let Some(FileItem{name, ..}) = self.files.selected_item() {
+            path_push(&mut self.heading, name);
+            let files = get_files(self.path().as_deref())?;
+            if ! files.is_empty() {
+                self.files.set_items(to_fileitems(files));
+                return Ok(Action::Render);
+            }
+        }
+        Ok(Action::Nothing)
     }
 
     fn path(&self) -> Option<&Utf8Path> {
@@ -137,7 +158,7 @@ impl WidgetRef for App {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         let layout = compute_layout(area);
         self.heading.render_ref(layout[0], buf);
-        self.list.render_ref(layout[1], buf);
+        self.files.render_ref(layout[1], buf);
     }
 }
 
@@ -214,8 +235,9 @@ fn shorten_to(s: &str, width: usize) -> Cow<str> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::borrow::Cow;
+
+    use super::*;
 
     #[test]
     fn shorten_to_len_lt_width() {

@@ -1,3 +1,4 @@
+use crossterm::event::KeyCode;
 use ratatui::text::Line;
 
 mod list;
@@ -7,11 +8,7 @@ mod heading;
 #[derive(Debug)]
 pub enum Event {
     Resize(u16, u16),
-    Left,
-    Right,
-    Up,
-    Down,
-    Quit,
+    KeyPress(KeyCode),
 }
 
 #[derive(Debug)]

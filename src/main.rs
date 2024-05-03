@@ -9,7 +9,6 @@ use std::panic;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{command, Parser};
-use crossterm::event::KeyCode;
 use crossterm::ExecutableCommand;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use flexi_logger::{FileSpec, Logger, WriteMode};
@@ -66,6 +65,19 @@ fn handle_event(
 ) -> Result<Action, rusqlite::Error>
 {
     app.handle_event(|path| get_files(cache, path), event)
+}
+
+fn convert_event(event: crossterm::event::Event) -> Option<Event> {
+    use crossterm::event::Event as TermEvent;
+    use crossterm::event::KeyEventKind::{Press, Release};
+    use Event::*;
+    match event {
+        TermEvent::Resize(w, h) =>
+            Some(Resize(w, h)),
+        TermEvent::Key(event) if [Press, Release].contains(&event.kind) =>
+            Some(KeyPress(event.code)),
+        _ => None,
+    }
 }
 
 #[tokio::main]
@@ -143,24 +155,7 @@ async fn main() {
     };
     render(&mut terminal, &app).unwrap();
     while let Some(event) = terminal_events.try_next().await.unwrap() {
-        let event = match event {
-            crossterm::event::Event::Key(k) => match k.code {
-                KeyCode::Char('q') => Some(Event::Quit),
-                KeyCode::Down => Some(Event::Down),
-                KeyCode::Char('j') => Some(Event::Down),
-                KeyCode::Up => Some(Event::Up),
-                KeyCode::Char('k') => Some(Event::Up),
-                KeyCode::Right => Some(Event::Right),
-                KeyCode::Char(';') => Some(Event::Right),
-                KeyCode::Enter => Some(Event::Right),
-                KeyCode::Left => Some(Event::Left),
-                KeyCode::Char('h') => Some(Event::Left),
-                _ => None,
-            }
-            crossterm::event::Event::Resize(w, h) => Some(Event::Resize(w, h)),
-            _ => None,
-        };
-        if let Some(event) = event {
+        if let Some(event) = convert_event(event) {
             match handle_event(&cache, &mut app, event).unwrap() {
                 Action::Quit => break,
                 Action::Render => { render(&mut terminal, &app).unwrap(); },

@@ -1,5 +1,6 @@
 use std::cmp;
 
+use crossterm::event::KeyCode;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::prelude::Widget;
@@ -54,17 +55,19 @@ impl<T> List<T> {
 
     pub fn handle_event(&mut self, event: Event) -> Action {
         use Event::*;
-        use Action::*;
+        use KeyCode::*;
         match event {
             Resize(_, h) => {
                 self.height = h;
                 self.fix_offset();
             }
-            Up => self.move_selection(-1),
-            Down => self.move_selection(1),
-            _ => return Nothing,
+            KeyPress(Up) => self.move_selection(-1),
+            KeyPress(Char('k')) => self.move_selection(-1),
+            KeyPress(Down) => self.move_selection(1),
+            KeyPress(Char(';')) => self.move_selection(1),
+            _ => return Action::Nothing,
         }
-        Render
+        Action::Render
     }
 
     fn move_selection(&mut self, delta: isize) {
