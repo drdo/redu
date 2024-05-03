@@ -64,7 +64,7 @@ impl<T> List<T> {
             KeyPress(Up) => self.move_selection(-1),
             KeyPress(Char('k')) => self.move_selection(-1),
             KeyPress(Down) => self.move_selection(1),
-            KeyPress(Char(';')) => self.move_selection(1),
+            KeyPress(Char('j')) => self.move_selection(1),
             _ => return Action::Nothing,
         }
         Action::Render
