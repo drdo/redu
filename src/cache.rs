@@ -6,8 +6,6 @@ use rusqlite::{Connection, params, Row, Transaction};
 use rusqlite::functions::FunctionFlags;
 use uuid::Uuid;
 
-use crate::types::Snapshot;
-
 // TODO: Some queries are vulnerable to SQL injection
 // if the restic binary attacks us
 
@@ -64,13 +62,11 @@ impl Cache {
 
     pub fn get_snapshots(
         &self,
-    ) -> Result<Vec<Snapshot>, rusqlite::Error>
+    ) -> Result<Vec<Box<str>>, rusqlite::Error>
     {
         self.conn
             .prepare("SELECT id FROM snapshots")?
-            .query_and_then([], |row| Ok(Snapshot {
-                id: row.get("id")?
-            }))?
+            .query_and_then([], |row| Ok(row.get("id")?))?
             .collect()
     }
 
@@ -279,4 +275,3 @@ impl<'a> Iterator for FileTreeIter<'a> {
         }
     }
 }
-

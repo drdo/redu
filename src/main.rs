@@ -21,7 +21,6 @@ use component::app::App;
 
 use crate::cache::Cache;
 use crate::restic::Restic;
-use crate::types::Snapshot;
 use crate::component::{Action, Event};
 
 mod cache;
@@ -98,15 +97,15 @@ async fn main() {
     eprintln!("Using cache file '{}'", cache.filename());
     
     // Figure out what snapshots we need to update
-    let snapshots: Vec<Snapshot> = {
+    let snapshots: Vec<Box<str>> = {
         eprintln!("Fetching restic snapshot list");
         let restic_snapshots = restic.snapshots().await.0.unwrap();
         
         // Delete snapshots from the DB that were deleted on Restic
         for snapshot in cache.get_snapshots().unwrap() {
             if ! restic_snapshots.contains(&snapshot) {
-                eprintln!("Deleting DB Snapshot {:?} (missing from restic)", snapshot.id);
-                cache.delete_snapshot(&snapshot.id).unwrap();
+                eprintln!("Deleting DB Snapshot {:?} (missing from restic)", snapshot);
+                cache.delete_snapshot(&snapshot).unwrap();
             }
         }
         
@@ -118,9 +117,9 @@ async fn main() {
     if snapshots.len() > 0 {
         eprintln!("Need to fetch {} snapshot(s)", snapshots.len());
         for (snapshot, i) in snapshots.iter().zip(1..) {
-            eprintln!("Fetching snapshot {:?} [{}/{}]", &snapshot.id, i, snapshots.len());
-            let (mut files, _) = restic.ls(&snapshot.id).await;
-            let handle = cache.start_snapshot(&snapshot.id).unwrap();
+            eprintln!("Fetching snapshot {:?} [{}/{}]", &snapshot, i, snapshots.len());
+            let (mut files, _) = restic.ls(&snapshot).await;
+            let handle = cache.start_snapshot(&snapshot).unwrap();
             while let Some(f) = files.try_next().await.unwrap() {
                 handle.insert_file(&f.path, f.size).unwrap()
             }

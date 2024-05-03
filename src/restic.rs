@@ -1,6 +1,5 @@
 use std::pin::Pin;
 use std::process::{ExitStatus, Stdio};
-use std::rc::Rc;
 
 use camino::Utf8PathBuf;
 use futures::{Stream, stream, StreamExt};
@@ -11,7 +10,7 @@ use tokio::io::AsyncReadExt;
 use tokio::process::{Child, Command};
 use tokio_util::codec::{FramedRead, LinesCodec, LinesCodecError};
 
-use crate::types::{File, Snapshot};
+use crate::types::File;
 
 pub trait LineStream: Stream<Item=Result<String, LinesCodecError>> {}
 impl<S: Stream<Item=Result<String, LinesCodecError>>> LineStream for S {}
@@ -87,7 +86,7 @@ impl Restic {
         json_from_stdout(self.run_command(["cat", "config"]).await).await
     }
 
-    pub async fn snapshots(&self) -> GreedyOutput<Vec<Snapshot>>
+    pub async fn snapshots(&self) -> GreedyOutput<Vec<Box<str>>>
     {
         json_from_stdout(self.run_command(["snapshots"]).await).await
     }
@@ -95,11 +94,9 @@ impl Restic {
     pub async fn ls(&self, snapshot: &str) -> StreamOutput<File>
     {
         let parse_entry = {
-            let snapshot: Rc<str> = Rc::from(snapshot);
             move |mut v: Value| -> Option<File> {
                 let mut m = std::mem::take(v.as_object_mut()?);
                 Some(File {
-                    snapshot: snapshot.clone(),
                     path: Utf8PathBuf::from(m.remove("path")?.as_str()?),
                     size: m.remove("size")?.as_u64()? as usize,
                 })
@@ -131,7 +128,6 @@ impl Restic {
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
-    pub version: u32,
     pub id: String,
 }
 
