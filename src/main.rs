@@ -103,6 +103,12 @@ async fn main() {
         .start()
         .unwrap();
 
+    unsafe {
+            rusqlite::trace::config_log(Some(|code, msg| {
+            error!(target: "sqlite", "({code}) {msg}");
+        }));
+    }
+
     let cli = Cli::parse();
     let restic = Restic::new(&cli.repo, cli.password_command.as_ref().map(|s| s.as_str()));
     eprintln!("Getting restic config");
