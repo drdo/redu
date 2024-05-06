@@ -1,10 +1,13 @@
-use std::collections::{hash_map, HashMap};
-
 use camino::{Utf8Path, Utf8PathBuf};
 use directories::ProjectDirs;
 use rusqlite::{Connection, params, Row, Transaction};
 use rusqlite::functions::FunctionFlags;
 use uuid::Uuid;
+
+use crate::cache::filetree::FileTree;
+use crate::types::{Directory, Entry, File};
+
+mod filetree;
 
 // TODO: Some queries are vulnerable to SQL injection
 // if the restic binary attacks us
@@ -76,7 +79,7 @@ impl Cache {
     pub fn get_max_file_sizes(
         &self,
         path: Option<impl AsRef<Utf8Path>>,
-    ) -> Result<Vec<(Utf8PathBuf, usize)>, rusqlite::Error>
+    ) -> Result<Vec<Entry>, rusqlite::Error>
     {
         let aux = |row: &Row| {
             let child_path = {
@@ -88,28 +91,47 @@ impl Cache {
                     .unwrap_or(child_path)
             };
             let size = row.get("size")?;
-            Ok((child_path, size))
+            Ok(if row.get("is_dir")? {
+                Entry::Directory(Directory { path: child_path, size })
+            } else {
+                Entry::File(File { path: child_path, size })
+            })
         };
 
         match path {
             None => {
-                let mut stmt = self.conn.prepare(
-                    "SELECT path, max(size) as size \
-                     FROM files \
-                     WHERE path_parent(path) IS NULL \
-                     GROUP BY path \
-                     ORDER BY size DESC")?;
+                let mut stmt = self.conn.prepare("\
+                    WITH
+                        fs AS (SELECT path, size, 0 as is_dir
+                               FROM files
+                               WHERE parent IS NULL),
+                        dirs AS (SELECT path, size, 1 as is_dir
+                                 FROM directories
+                                 WHERE parent IS NULL)
+                    SELECT path, max(size) as size, max(is_dir) as is_dir
+                    FROM (SELECT * FROM fs UNION ALL SELECT * FROM dirs) AS entries
+                    GROUP BY path
+                    ORDER BY size DESC
+                ")?;
                 let rows = stmt.query_and_then([], aux)?;
                 rows.collect()
             }
             Some(ref path) => {
-                let mut stmt = self.conn.prepare(
-                    "SELECT path, max(size) as size \
-                     FROM files \
-                     WHERE path_parent(path) = ? \
-                     GROUP BY path \
-                     ORDER BY size DESC")?;
-                let rows = stmt.query_and_then([path.as_ref().as_str()], aux)?;
+                let mut stmt = self.conn.prepare("\
+                    WITH
+                        fs AS (SELECT path, size, 0 as is_dir
+                               FROM files
+                               WHERE parent = ?),
+                        dirs AS (SELECT path, size, 1 as is_dir
+                                 FROM directories
+                                 WHERE parent = ?)
+                    SELECT path, max(size) as size, max(is_dir) as is_dir
+                    FROM (SELECT * FROM fs UNION ALL SELECT * FROM dirs) AS entries
+                    GROUP BY path
+                    ORDER BY size DESC
+                ")?;
+                let path_str = path.as_ref().as_str();
+                let rows = stmt.query_and_then([path_str, path_str], aux)?;
                 rows.collect()
             }
         }
@@ -185,93 +207,15 @@ impl<'cache> SnapshotHandle<'cache> {
             "INSERT INTO snapshots (id) VALUES (?)",
             [&self.snapshot])?;
         {
-            let mut stmt = self.tx.prepare("INSERT INTO files VALUES (?, ?, ?)")?;
-            for (path, size) in tree.iter() {
-                stmt.execute(params![&self.snapshot, path.into_string(), size])?;
-            }
+            let mut file_stmt = self.tx.prepare("INSERT INTO files VALUES (?, ?, ?)")?;
+            let mut dir_stmt = self.tx.prepare("INSERT INTO directories VALUES (?, ?, ?)")?;
+            for entry in tree.iter() { match entry {
+                Entry::File(File{path, size}) =>
+                    file_stmt.execute(params![&self.snapshot, path.into_string(), size])?,
+                Entry::Directory(Directory{path, size}) =>
+                    dir_stmt.execute(params![&self.snapshot, path.into_string(), size])?,
+            };}
         }
         self.tx.commit()
-    }
-}
-
-////////////////////////////////////////////////////////////////////////////////
-struct FileTree {
-    size: usize,
-    children: HashMap<Box<str>, FileTree>,
-}
-
-impl FileTree {
-    fn new() -> FileTree {
-        FileTree {
-            size: 0,
-            children: HashMap::new(),
-        }
-    }
-
-    fn insert(&mut self, path: &Utf8Path, size: usize) {
-        let mut current = self;
-        for c in path.iter() {
-            current.size += size;
-            current = current.children.entry(Box::from(c)).or_insert(FileTree::new());
-        }
-        current.size = size;
-    }
-
-    fn iter<'a>(&'a self) -> FileTreeIter<'a> {
-        FileTreeIter {
-            stack: vec![FileTreeIterNode {
-                path: None,
-                size: self.size,
-                children: self.children.iter(),
-            }]
-        }
-    }
-}
-
-struct FileTreeIter<'a> {
-    stack: Vec<FileTreeIterNode<'a>>,
-}
-
-struct FileTreeIterNode<'a> {
-    path: Option<Utf8PathBuf>,
-    size: usize,
-    children: hash_map::Iter<'a, Box<str>, FileTree>,
-}
-
-impl<'a> FileTreeIterNode<'a> {
-    fn path_extend(&self, path: &(impl AsRef<str> + ?Sized)) -> Utf8PathBuf {
-        let mut extended_path = self.path.clone().unwrap_or_default();
-        extended_path.push(Utf8Path::new(path));
-        extended_path
-    }
-}
-
-impl<'a> Iterator for FileTreeIter<'a> {
-    type Item = (Utf8PathBuf, usize);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        // Depth first traversal
-        loop {
-            match self.stack.pop() {
-                None => break None,
-                Some(mut node) => {
-                    match node.children.next() {
-                        None =>
-                            break node.path.map(|p| (p, node.size)),
-                        Some((name, tree)) => {
-                            let new_node = {
-                                FileTreeIterNode {
-                                    path: Some(node.path_extend(name)),
-                                    size: tree.size,
-                                    children: tree.children.iter(),
-                                }
-                            };
-                            self.stack.push(node);
-                            self.stack.push(new_node);
-                        }
-                    }
-                }
-            }
-        }
     }
 }

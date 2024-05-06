@@ -10,7 +10,7 @@ use tokio::io::AsyncReadExt;
 use tokio::process::{Child, Command};
 use tokio_util::codec::{FramedRead, LinesCodec, LinesCodecError};
 
-use crate::types::File;
+use crate::types::{File, Snapshot};
 
 pub trait LineStream: Stream<Item=Result<String, LinesCodecError>> {}
 impl<S: Stream<Item=Result<String, LinesCodecError>>> LineStream for S {}
@@ -86,7 +86,7 @@ impl Restic {
         json_from_stdout(self.run_command(["cat", "config"]).await).await
     }
 
-    pub async fn snapshots(&self) -> GreedyOutput<Vec<Box<str>>>
+    pub async fn snapshots(&self) -> GreedyOutput<Vec<Snapshot>>
     {
         json_from_stdout(self.run_command(["snapshots"]).await).await
     }

@@ -7,12 +7,13 @@ use std::borrow::Cow;
 use std::io::stdout;
 use std::panic;
 
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8Path;
 use clap::{command, Parser};
 use crossterm::ExecutableCommand;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use flexi_logger::{FileSpec, Logger, WriteMode};
 use futures::TryStreamExt;
+use log::error;
 use ratatui::{CompletedFrame, Terminal};
 use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::widgets::WidgetRef;
@@ -20,13 +21,27 @@ use ratatui::widgets::WidgetRef;
 use component::app::App;
 
 use crate::cache::Cache;
-use crate::restic::Restic;
 use crate::component::{Action, Event};
+use crate::restic::Restic;
+use crate::types::Entry;
 
 mod cache;
 mod restic;
 mod types;
 mod component;
+
+macro_rules! with_greedy_stderr_logging {
+    ($expr:expr) => {
+        {
+            use futures::StreamExt;
+            let (x, mut stderr_stream) = $expr;
+            while let Some(line) = stderr_stream.next().await {
+                error!("stderr: {}", line.unwrap())
+            }
+            x
+        }
+    };
+}
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -41,7 +56,7 @@ struct Cli {
 fn get_files(
     cache: &Cache,
     path: Option<&Utf8Path>,
-) -> Result<Vec<(Utf8PathBuf, usize)>, rusqlite::Error>
+) -> Result<Vec<Entry>, rusqlite::Error>
 {
     cache.get_max_file_sizes(path)
 }
@@ -99,8 +114,12 @@ async fn main() {
     // Figure out what snapshots we need to update
     let snapshots: Vec<Box<str>> = {
         eprintln!("Fetching restic snapshot list");
-        let restic_snapshots = restic.snapshots().await.0.unwrap();
-        
+        let restic_snapshots = with_greedy_stderr_logging!(restic.snapshots().await)
+            .unwrap()
+            .into_iter()
+            .map(|s| s.id)
+            .collect::<Vec<Box<str>>>();
+
         // Delete snapshots from the DB that were deleted on Restic
         for snapshot in cache.get_snapshots().unwrap() {
             if ! restic_snapshots.contains(&snapshot) {

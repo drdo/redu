@@ -13,6 +13,7 @@ use crate::component;
 use crate::component::{Action, Event, ToLine};
 use crate::component::heading::Heading;
 use crate::component::list::List;
+use crate::types::{Directory, Entry, File};
 
 struct PathItem(Option<Utf8PathBuf>);
 
@@ -25,13 +26,14 @@ impl Display for PathItem {
     }
 }
 
-struct FileItem {
-    name: Utf8PathBuf,
+struct FsItem {
+    path: Utf8PathBuf,
     size: usize,
     relative_size: f64,
+    is_dir: bool,
 }
 
-impl FileItem {
+impl FsItem {
     fn to_line_string(&self, width: u16) -> String {
         let mut text =
             format!(" {:>10}", humansize::format_size(self.size, humansize::BINARY));
@@ -48,13 +50,13 @@ impl FileItem {
         }
         {
             let available_width = max(0, width as isize - text.len() as isize) as usize;
-            text.push_str(component::shorten_to(self.name.as_str(), available_width).as_ref());
+            text.push_str(component::shorten_to(self.path.as_str(), available_width).as_ref());
         }
         text
     }
 }
 
-impl ToLine for FileItem {
+impl ToLine for FsItem {
     fn to_line(&self, width: u16) -> Line {
         Line::raw(self.to_line_string(width))
     }
@@ -62,7 +64,7 @@ impl ToLine for FileItem {
 
 pub struct App {
     heading: Heading<PathItem>,
-    files: List<FileItem>,
+    files: List<FsItem>,
 }
 
 impl App {
@@ -70,7 +72,7 @@ impl App {
     pub fn new<'a, P>(
         dimensions: (u16, u16),
         path: Option<P>,
-        files: Vec<(Utf8PathBuf, usize)>,
+        files: Vec<Entry>,
     ) -> Self
     where
         P: Into<Cow<'a, Utf8Path>>,
@@ -83,7 +85,7 @@ impl App {
                 x: 0, y: 0,
                 width: dimensions.0, height: dimensions.1
             });
-            List::new(layout[1].height, to_fileitems(files), true)
+            List::new(layout[1].height, to_fsitems(files), true)
         };
         App { heading, files: list }
     }
@@ -95,7 +97,7 @@ impl App {
         event: Event,
     ) -> Result<Action, E>
     where
-        G: FnOnce(Option<&Utf8Path>) -> Result<Vec<(Utf8PathBuf, usize)>, E>,
+        G: FnOnce(Option<&Utf8Path>) -> Result<Vec<Entry>, E>,
     {
         log::debug!("received {:?}", event);
         use Event::*;
@@ -121,10 +123,10 @@ impl App {
         get_files: G,
     ) -> Result<Action, E>
     where
-        G: FnOnce(Option<&Utf8Path>) -> Result<Vec<(Utf8PathBuf, usize)>, E>,
+        G: FnOnce(Option<&Utf8Path>) -> Result<Vec<Entry>, E>,
     {
         path_pop(&mut self.heading);
-        self.files.set_items(to_fileitems(get_files(self.path())?));
+        self.files.set_items(to_fsitems(get_files(self.path())?));
         log::debug!("path is now {:?}", self.path());
         Ok(Action::Render)
     }
@@ -134,17 +136,18 @@ impl App {
         get_files: G,
     ) -> Result<Action, E>
         where
-            G: FnOnce(Option<&Utf8Path>) -> Result<Vec<(Utf8PathBuf, usize)>, E>,
+            G: FnOnce(Option<&Utf8Path>) -> Result<Vec<Entry>, E>,
     {
-        if let Some(FileItem{name, ..}) = self.files.selected_item() {
-            path_push(&mut self.heading, name);
-            let files = get_files(self.path().as_deref())?;
-            if ! files.is_empty() {
-                self.files.set_items(to_fileitems(files));
-                return Ok(Action::Render);
+        match self.files.selected_item() {
+            Some(FsItem { path: name, is_dir, ..}) if *is_dir => {
+                path_push(&mut self.heading, name);
+                let files = get_files(self.path().as_deref())?;
+                self.files.set_items(to_fsitems(files));
+                Ok(Action::Render)
             }
+            _ =>
+                Ok(Action::Nothing)
         }
-        Ok(Action::Nothing)
     }
 
     fn path(&self) -> Option<&Utf8Path> {
@@ -162,16 +165,25 @@ impl WidgetRef for App {
 }
 
 /// `files` is expected to be sorted by size, largest first.
-fn to_fileitems(files: Vec<(Utf8PathBuf, usize)>) -> Vec<FileItem> {
+fn to_fsitems(files: Vec<Entry>) -> Vec<FsItem> {
     if files.is_empty() { return Vec::new() }
 
-    let largest = files[0].1 as f64;
+    let largest = files[0].size() as f64;
     files
         .into_iter()
-        .map(|(name, size)| FileItem {
-            name,
-            size,
-            relative_size: size as f64 / largest
+        .map(|e| match e {
+            Entry::File(File{ path, size }) => FsItem {
+                path,
+                size,
+                relative_size: size as f64 / largest,
+                is_dir: false,
+            },
+            Entry::Directory(Directory{ path, size }) => FsItem {
+                path,
+                size,
+                relative_size: size as f64 / largest,
+                is_dir: true,
+            },
         })
         .collect()
 }
@@ -218,8 +230,8 @@ mod tests {
 
     #[test]
     fn fileitem_to_line() {
-        let f = FileItem {
-            name: "1234567890123456789012345678901234567890".into(),
+        let f = FsItem {
+            path: "1234567890123456789012345678901234567890".into(),
             size: 999 * 1024 + 1010,
             relative_size: 0.9,
         };

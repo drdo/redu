@@ -1,4 +1,10 @@
 use camino::Utf8PathBuf;
+use serde::Deserialize;
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct Snapshot {
+    pub id: Box<str>,
+}
 
 #[derive(Clone, Debug)]
 pub struct File {
@@ -6,3 +12,22 @@ pub struct File {
     pub size: usize,
 }
 
+#[derive(Clone, Debug)]
+pub struct Directory {
+    pub path: Utf8PathBuf,
+    pub size: usize,
+}
+
+pub enum Entry {
+    Directory(Directory),
+    File(File),
+}
+
+impl Entry {
+    pub fn size(&self) -> usize {
+        match self {
+            Entry::Directory(d) => d.size,
+            Entry::File(f) => f.size,
+        }
+    }
+}
