@@ -144,10 +144,10 @@ async fn json_from_stdout<T: DeserializeOwned>(
             child.stdout.take().unwrap().read_to_string(&mut buf).await?;
             buf
         };
-        let config = serde_json::from_str(&out)?;
+        let t = serde_json::from_str(&out)?;
         let status = child.wait().await?;
         if status.success() {
-            config
+            t
         } else {
             Err(Error::Exit(status))?
         }
