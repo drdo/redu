@@ -24,10 +24,14 @@ impl<T: Display> WidgetRef for Heading<T> {
                 area.width as usize - string.len()
             ).as_ref()
         );
-        let remaining_width = max(
+        let mut remaining_width = max(
             0,
             area.width as isize - 4 - string.len() as isize
         ) as usize;
+        if remaining_width > 0 {
+            string.push(' ');
+            remaining_width -= 1;
+        }
         string.push_str(&"-".repeat(remaining_width));
         Paragraph::new(string).render_ref(area, buf);
     }
