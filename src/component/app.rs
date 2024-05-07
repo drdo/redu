@@ -33,8 +33,8 @@ struct FsItem {
     is_dir: bool,
 }
 
-impl FsItem {
-    fn to_line_string(&self, width: u16) -> String {
+impl ToLine for FsItem {
+    fn to_line(&self, width: u16) -> Line {
         let mut text =
             format!(" {:>10}", humansize::format_size(self.size, humansize::BINARY));
         { // Bar
@@ -52,13 +52,7 @@ impl FsItem {
             let available_width = max(0, width as isize - text.len() as isize) as usize;
             text.push_str(component::shorten_to(self.path.as_str(), available_width).as_ref());
         }
-        text
-    }
-}
-
-impl ToLine for FsItem {
-    fn to_line(&self, width: u16) -> Line {
-        Line::raw(self.to_line_string(width))
+        Line::raw(text)
     }
 }
 
@@ -234,14 +228,15 @@ mod tests {
             path: "1234567890123456789012345678901234567890".into(),
             size: 999 * 1024 + 1010,
             relative_size: 0.9,
+            is_dir: false,
         };
         assert_eq!(
-            f.to_line_string(80),
-            " 999.99 KiB [##############  ] 1234567890123456789012345678901234567890".to_owned()
+            f.to_line(80),
+            Line::raw(" 999.99 KiB [##############  ] 1234567890123456789012345678901234567890".to_owned())
         );
         assert_eq!(
-            f.to_line_string(2),
-            " 999.99 KiB [##############  ] ".to_owned()
+            f.to_line(2),
+            Line::raw(" 999.99 KiB [##############  ] ".to_owned())
         );
     }
 }
