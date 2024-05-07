@@ -21,7 +21,7 @@ pub enum Action {
 }
 
 trait ToLine {
-    fn to_line(&self, width: u16) -> Line;
+    fn to_line(&self, width: u16, selected: bool) -> Line;
 }
 
 fn shorten_to(s: &str, width: usize) -> Cow<str> {

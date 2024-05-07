@@ -7,6 +7,8 @@ use camino::{Utf8Path, Utf8PathBuf};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::prelude::Line;
+use ratatui::style::{Style, Stylize};
+use ratatui::text::Span;
 use ratatui::widgets::WidgetRef;
 
 use crate::component::{Action, Event, shorten_to, ToLine};
@@ -33,11 +35,11 @@ struct ListItem {
 }
 
 impl ToLine for ListItem {
-    fn to_line(&self, width: u16) -> Line {
-        let mut text =
-        // Size
-            format!(" {:>10}", humansize::format_size(self.size, humansize::BINARY));
-        { // Bar
+    fn to_line(&self, width: u16, selected: bool) -> Line {
+        let size_span = Span::raw(
+            format!(" {:>10}", humansize::format_size(self.size, humansize::BINARY))
+        );
+        let bar_span = Span::raw({
             let max_bar_width: usize = max(16, min(24, (0.1 * width as f64) as usize));
             let bar_width = (self.relative_size * max_bar_width as f64) as usize;
             let bar = format!(
@@ -46,27 +48,35 @@ impl ToLine for ListItem {
                 bar_size = bar_width,
                 empty_bar_size = max_bar_width - bar_width
             );
-            text.push_str(&bar);
-        }
-        // Name
-        {
-            let available_width = max(0, width as isize - text.len() as isize) as usize;
-            let name =
-                if self.is_dir
-                    && self.name
-                        .iter().last()
-                        .and_then(|s| s.chars().last())
-                        != Some('/')
-                { // Add trailing slash for dirs
-                    let mut name = self.name.as_str().to_owned();
-                    name.push('/');
-                    Cow::Owned(name)
-                } else {
-                    Cow::Borrowed(self.name.as_str())
-                };
-            text.push_str(shorten_to(&name, available_width).as_ref());
-        }
-        Line::raw(text)
+            bar
+        });
+        let name_span = {
+            let available_width = {
+                let used = size_span.content.len() + bar_span.content.len();
+                max(0, width as isize - used as isize) as usize
+            };
+            if self.is_dir
+                && self.name
+                    .iter().last()
+                    .and_then(|s| s.chars().last())
+                    != Some('/')
+            {
+                let mut name = self.name.as_str().to_owned();
+                name.push('/');
+                let span = Span::raw(shorten_to(&name, available_width).into_owned())
+                    .bold();
+                if selected { span.dark_gray() }
+                else { span.blue() }
+            } else {
+                Span::raw(self.name.as_str())
+            }
+        };
+        let style = if selected {
+            Style::new().black().on_white()
+        } else {
+            Style::new()
+        };
+        Line::from(vec![size_span, bar_span, name_span]).style(style)
     }
 }
 

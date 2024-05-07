@@ -4,7 +4,6 @@ use crossterm::event::KeyCode;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::prelude::Widget;
-use ratatui::style::Stylize;
 use ratatui::widgets::{ListItem, WidgetRef};
 
 use crate::component::{Action, Event, ToLine};
@@ -105,12 +104,10 @@ impl<T: ToLine> WidgetRef for List<T> {
             .iter()
             .enumerate()
             .map(|(index, item)| {
-                let item = ListItem::new(item.to_line(area.width));
-                if index == self.selected && self.focused {
-                    item.black().on_white()
-                } else {
-                    item
-                }
+                let line = item.to_line(
+                    area.width,
+                    index == self.selected && self.focused);
+                ListItem::new(line)
             });
         ratatui::widgets::List::new(items).render(area, buf);
     }
