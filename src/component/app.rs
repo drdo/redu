@@ -8,9 +8,8 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::prelude::Line;
 use ratatui::widgets::WidgetRef;
-use crate::component;
 
-use crate::component::{Action, Event, ToLine};
+use crate::component::{Action, Event, shorten_to, ToLine};
 use crate::component::heading::Heading;
 use crate::component::list::List;
 use crate::types::{Directory, Entry, File};
@@ -52,7 +51,20 @@ impl ToLine for ListItem {
         // Name
         {
             let available_width = max(0, width as isize - text.len() as isize) as usize;
-            text.push_str(component::shorten_to(self.name.as_str(), available_width).as_ref());
+            let name =
+                if self.is_dir
+                    && self.name
+                        .iter().last()
+                        .and_then(|s| s.chars().last())
+                        != Some('/')
+                { // Add trailing slash for dirs
+                    let mut name = self.name.as_str().to_owned();
+                    name.push('/');
+                    Cow::Owned(name)
+                } else {
+                    Cow::Borrowed(self.name.as_str())
+                };
+            text.push_str(shorten_to(&name, available_width).as_ref());
         }
         Line::raw(text)
     }
