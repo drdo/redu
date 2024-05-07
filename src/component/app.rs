@@ -36,6 +36,7 @@ struct FsItem {
 impl ToLine for FsItem {
     fn to_line(&self, width: u16) -> Line {
         let mut text =
+        // Size
             format!(" {:>10}", humansize::format_size(self.size, humansize::BINARY));
         { // Bar
             let max_bar_width: usize = max(16, min(24, (0.1 * width as f64) as usize));
@@ -48,6 +49,7 @@ impl ToLine for FsItem {
             );
             text.push_str(&bar);
         }
+        // Name
         {
             let available_width = max(0, width as isize - text.len() as isize) as usize;
             text.push_str(component::shorten_to(self.path.as_str(), available_width).as_ref());
