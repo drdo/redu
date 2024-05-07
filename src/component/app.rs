@@ -81,7 +81,7 @@ impl App {
                 x: 0, y: 0,
                 width: dimensions.0, height: dimensions.1
             });
-            List::new(layout[1].height, to_fsitems(files), true)
+            List::new(layout[1].height, to_listitems(files), true)
         };
         App { heading, files: list }
     }
@@ -122,7 +122,7 @@ impl App {
         G: FnOnce(Option<&Utf8Path>) -> Result<Vec<Entry>, E>,
     {
         path_pop(&mut self.heading);
-        self.files.set_items(to_fsitems(get_files(self.path())?));
+        self.files.set_items(to_listitems(get_files(self.path())?));
         log::debug!("path is now {:?}", self.path());
         Ok(Action::Render)
     }
@@ -138,7 +138,7 @@ impl App {
             Some(ListItem { name, is_dir, ..}) if *is_dir => {
                 path_push(&mut self.heading, name);
                 let files = get_files(self.path().as_deref())?;
-                self.files.set_items(to_fsitems(files));
+                self.files.set_items(to_listitems(files));
                 Ok(Action::Render)
             }
             _ =>
@@ -161,7 +161,7 @@ impl WidgetRef for App {
 }
 
 /// `files` is expected to be sorted by size, largest first.
-fn to_fsitems(files: Vec<Entry>) -> Vec<ListItem> {
+fn to_listitems(files: Vec<Entry>) -> Vec<ListItem> {
     if files.is_empty() { return Vec::new() }
 
     let largest = files[0].size() as f64;
