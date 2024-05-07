@@ -26,14 +26,14 @@ impl Display for PathItem {
     }
 }
 
-struct FsItem {
+struct ListItem {
     name: Utf8PathBuf,
     size: usize,
     relative_size: f64,
     is_dir: bool,
 }
 
-impl ToLine for FsItem {
+impl ToLine for ListItem {
     fn to_line(&self, width: u16) -> Line {
         let mut text =
         // Size
@@ -60,7 +60,7 @@ impl ToLine for FsItem {
 
 pub struct App {
     heading: Heading<PathItem>,
-    files: List<FsItem>,
+    files: List<ListItem>,
 }
 
 impl App {
@@ -135,7 +135,7 @@ impl App {
             G: FnOnce(Option<&Utf8Path>) -> Result<Vec<Entry>, E>,
     {
         match self.files.selected_item() {
-            Some(FsItem { name, is_dir, ..}) if *is_dir => {
+            Some(ListItem { name, is_dir, ..}) if *is_dir => {
                 path_push(&mut self.heading, name);
                 let files = get_files(self.path().as_deref())?;
                 self.files.set_items(to_fsitems(files));
@@ -161,20 +161,20 @@ impl WidgetRef for App {
 }
 
 /// `files` is expected to be sorted by size, largest first.
-fn to_fsitems(files: Vec<Entry>) -> Vec<FsItem> {
+fn to_fsitems(files: Vec<Entry>) -> Vec<ListItem> {
     if files.is_empty() { return Vec::new() }
 
     let largest = files[0].size() as f64;
     files
         .into_iter()
         .map(|e| match e {
-            Entry::File(File{ path, size }) => FsItem {
+            Entry::File(File{ path, size }) => ListItem {
                 name: path,
                 size,
                 relative_size: size as f64 / largest,
                 is_dir: false,
             },
-            Entry::Directory(Directory{ path, size }) => FsItem {
+            Entry::Directory(Directory{ path, size }) => ListItem {
                 name: path,
                 size,
                 relative_size: size as f64 / largest,
@@ -226,7 +226,7 @@ mod tests {
 
     #[test]
     fn fileitem_to_line() {
-        let f = FsItem {
+        let f = ListItem {
             name: "1234567890123456789012345678901234567890".into(),
             size: 999 * 1024 + 1010,
             relative_size: 0.9,
