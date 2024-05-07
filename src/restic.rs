@@ -93,14 +93,12 @@ impl Restic {
 
     pub async fn ls(&self, snapshot: &str) -> StreamOutput<File>
     {
-        let parse_entry = {
-            move |mut v: Value| -> Option<File> {
-                let mut m = std::mem::take(v.as_object_mut()?);
-                Some(File {
-                    path: Utf8PathBuf::from(m.remove("path")?.as_str()?),
-                    size: m.remove("size")?.as_u64()? as usize,
-                })
-            }
+        let parse_entry = move |mut v: Value| -> Option<File> {
+            let mut m = std::mem::take(v.as_object_mut()?);
+            Some(File {
+                path: Utf8PathBuf::from(m.remove("path")?.as_str()?),
+                size: m.remove("size")?.as_u64()? as usize,
+            })
         };
 
         let mut child = self.run_command(["ls", snapshot]).await;

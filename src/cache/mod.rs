@@ -210,9 +210,9 @@ impl<'cache> SnapshotHandle<'cache> {
             let mut file_stmt = self.tx.prepare("INSERT INTO files VALUES (?, ?, ?)")?;
             let mut dir_stmt = self.tx.prepare("INSERT INTO directories VALUES (?, ?, ?)")?;
             for entry in tree.iter() { match entry {
-                Entry::File(File{path, size}) =>
+                Entry::File(File{ path, size}) =>
                     file_stmt.execute(params![&self.snapshot, path.into_string(), size])?,
-                Entry::Directory(Directory{path, size}) =>
+                Entry::Directory(Directory{ path, size}) =>
                     dir_stmt.execute(params![&self.snapshot, path.into_string(), size])?,
             };}
         }
