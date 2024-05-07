@@ -104,9 +104,9 @@ async fn main() {
         .unwrap();
 
     unsafe {
-            rusqlite::trace::config_log(Some(|code, msg| {
+        rusqlite::trace::config_log(Some(|code, msg| {
             error!(target: "sqlite", "({code}) {msg}");
-        }));
+        })).unwrap();
     }
 
     let cli = Cli::parse();
