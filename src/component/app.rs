@@ -27,7 +27,7 @@ impl Display for PathItem {
 }
 
 struct FsItem {
-    path: Utf8PathBuf,
+    name: Utf8PathBuf,
     size: usize,
     relative_size: f64,
     is_dir: bool,
@@ -52,7 +52,7 @@ impl ToLine for FsItem {
         // Name
         {
             let available_width = max(0, width as isize - text.len() as isize) as usize;
-            text.push_str(component::shorten_to(self.path.as_str(), available_width).as_ref());
+            text.push_str(component::shorten_to(self.name.as_str(), available_width).as_ref());
         }
         Line::raw(text)
     }
@@ -135,7 +135,7 @@ impl App {
             G: FnOnce(Option<&Utf8Path>) -> Result<Vec<Entry>, E>,
     {
         match self.files.selected_item() {
-            Some(FsItem { path: name, is_dir, ..}) if *is_dir => {
+            Some(FsItem { name, is_dir, ..}) if *is_dir => {
                 path_push(&mut self.heading, name);
                 let files = get_files(self.path().as_deref())?;
                 self.files.set_items(to_fsitems(files));
@@ -169,13 +169,13 @@ fn to_fsitems(files: Vec<Entry>) -> Vec<FsItem> {
         .into_iter()
         .map(|e| match e {
             Entry::File(File{ path, size }) => FsItem {
-                path,
+                name: path,
                 size,
                 relative_size: size as f64 / largest,
                 is_dir: false,
             },
             Entry::Directory(Directory{ path, size }) => FsItem {
-                path,
+                name: path,
                 size,
                 relative_size: size as f64 / largest,
                 is_dir: true,
@@ -227,7 +227,7 @@ mod tests {
     #[test]
     fn fileitem_to_line() {
         let f = FsItem {
-            path: "1234567890123456789012345678901234567890".into(),
+            name: "1234567890123456789012345678901234567890".into(),
             size: 999 * 1024 + 1010,
             relative_size: 0.9,
             is_dir: false,
