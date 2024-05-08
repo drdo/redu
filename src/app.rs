@@ -327,7 +327,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fileitem_to_line() {
+    fn list_entry_to_line() {
         let f = ListEntry {
             name: "1234567890123456789012345678901234567890".into(),
             size: 999 * 1024 + 1010,
