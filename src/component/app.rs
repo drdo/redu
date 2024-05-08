@@ -43,13 +43,11 @@ impl ToLine for ListItem {
                 max(0, width as isize - used as isize) as usize
             };
             if self.is_dir
-                && self.name
-                    .iter().last()
-                    .and_then(|s| s.chars().last())
-                    != Some('/')
             {
-                let mut name = self.name.as_str().to_owned();
-                name.push('/');
+                let mut name = Cow::Borrowed(self.name.as_str());
+                if name.chars().last() != Some('/') {
+                    name.to_mut().push('/');
+                }
                 let span = Span::raw(shorten_to(&name, available_width).into_owned())
                     .bold();
                 if selected { span.dark_gray() }
