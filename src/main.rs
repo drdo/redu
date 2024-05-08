@@ -171,7 +171,7 @@ async fn main() {
     let mut app = {
         let rect = terminal.size().unwrap();
         App::new(
-            (rect.width, rect.height),
+            rect.as_size(),
             None::<Cow<Utf8Path>>,
             get_files(&cache, None).unwrap(),
         )

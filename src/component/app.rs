@@ -1,17 +1,16 @@
 use std::borrow::Cow;
+use std::cmp;
 use std::cmp::{max, min};
-use std::rc::Rc;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Constraint, Direction, Layout, Position, Rect, Size};
 use ratatui::prelude::Line;
 use ratatui::style::{Style, Stylize};
 use ratatui::text::Span;
-use ratatui::widgets::{Paragraph, WidgetRef};
+use ratatui::widgets::{List, ListItem, Paragraph, WidgetRef};
 
 use crate::component::{Action, Event, shorten_to, ToLine};
-use crate::component::list::List;
 use crate::types::{Directory, Entry, File};
 
 struct ListEntry {
@@ -66,37 +65,39 @@ impl ToLine for ListEntry {
 }
 
 pub struct App {
+    heading_size: Size,
+    list_size: Size,
     path: Option<Utf8PathBuf>,
-    files: List<ListEntry>,
+    entries: Vec<ListEntry>,
+    selected: usize,
+    offset: usize,
 }
 
 impl App {
     /// `files` is expected to be sorted by size, largest first.
     pub fn new<'a, P>(
-        dimensions: (u16, u16),
+        screen: Size,
         path: Option<P>,
         files: Vec<Entry>,
     ) -> Self
     where
         P: Into<Cow<'a, Utf8Path>>,
     {
-        let list = {
-            let layout = compute_layout(Rect {
-                x: 0, y: 0,
-                width: dimensions.0, height: dimensions.1
-            });
-            List::new(layout[1].height, to_listitems(files), true)
-        };
+        let (heading_size, list_size) = compute_sizes(screen);
         App {
+            heading_size,
+            list_size,
             path: path.map(|p| p.into().into_owned()),
-            files: list,
+            entries: to_list_entries(files),
+            selected: 0,
+            offset: 0,
         }
     }
 
     /// The result of `get_files` is expected to be sorted by size, largest first.
     pub fn handle_event<E, G>(
         &mut self,
-        get_files: G,
+        get_entries: G,
         event: Event,
     ) -> Result<Action, E>
     where
@@ -106,58 +107,101 @@ impl App {
         use Event::*;
         use crossterm::event::KeyCode::*;
         match event {
-            Resize(w, h) => Ok(self.handle_resize(w, h)),
+            Resize(w, h) => Ok(self.handle_resize(Size::new(w, h))),
             KeyPress(Char('q')) => Ok(Action::Quit),
-            KeyPress(Right) => self.handle_right(get_files),
-            KeyPress(Char(';')) => self.handle_right(get_files),
-            KeyPress(Left) => self.handle_left(get_files),
-            KeyPress(Char('h')) => self.handle_left(get_files),
-            event => Ok(self.files.handle_event(event)),
+            KeyPress(Right) => self.handle_right(get_entries),
+            KeyPress(Char(';')) => self.handle_right(get_entries),
+            KeyPress(Left) => self.handle_left(get_entries),
+            KeyPress(Char('h')) => self.handle_left(get_entries),
+            KeyPress(Up) => { self.move_selection(-1); Ok(Action::Render) },
+            KeyPress(Char('k')) => { self.move_selection(-1); Ok(Action::Render) }
+            KeyPress(Down) => { self.move_selection(1); Ok(Action::Render) }
+            KeyPress(Char('j')) => { self.move_selection(1); Ok(Action::Render) }
+            _ => Ok(Action::Nothing)
         }
     }
 
-    fn handle_resize(&mut self, w: u16, h: u16) -> Action {
-        let layout = compute_dimensions((w, h));
-        self.files.handle_event(Event::Resize(layout[1].0, layout[1].1))
+    fn handle_resize(&mut self, new_size: Size) -> Action {
+        (self.heading_size, self.list_size) = compute_sizes(new_size);
+        self.fix_offset();
+        Action::Render
     }
 
     fn handle_left<E, G>(
         &mut self,
-        get_files: G,
+        get_entries: G,
     ) -> Result<Action, E>
     where
         G: FnOnce(Option<&Utf8Path>) -> Result<Vec<Entry>, E>,
     {
         path_pop(&mut self.path);
-        self.files.set_items(to_listitems(get_files(self.path.as_deref())?));
+        self.set_entries(get_entries(self.path.as_deref())?);
         log::debug!("path is now {:?}", self.path.as_deref());
         Ok(Action::Render)
     }
 
     fn handle_right<E, G>(
         &mut self,
-        get_files: G,
+        get_entries: G,
     ) -> Result<Action, E>
         where
             G: FnOnce(Option<&Utf8Path>) -> Result<Vec<Entry>, E>,
     {
-        match self.files.selected_item() {
-            Some(ListEntry { name, is_dir, ..}) if *is_dir => {
-                path_push(&mut self.path, name);
-                let files = get_files(self.path.as_deref())?;
-                self.files.set_items(to_listitems(files));
-                Ok(Action::Render)
-            }
-            _ =>
-                Ok(Action::Nothing)
+        if !self.entries.is_empty() && self.entries[self.selected].is_dir {
+            let name = &self.entries[self.selected].name;
+            path_push(&mut self.path, name);
+            let files = get_entries(self.path.as_deref())?;
+            self.set_entries(files);
+            Ok(Action::Render)
+        } else {
+            Ok(Action::Nothing)
         }
+    }
+
+    /// `entries` is expected to be sorted by size, largest first.
+    pub fn set_entries(&mut self, entries: Vec<Entry>) {
+        self.entries = to_list_entries(entries);
+        self.selected = cmp::max(
+            0,
+            cmp::min(
+                self.entries.len() as isize - 1,
+                self.selected as isize
+            ),
+        ) as usize;
+        self.offset = 0;
+    }
+
+    fn move_selection(&mut self, delta: isize) {
+        if self.entries.is_empty() { return }
+
+        let selected = self.selected as isize;
+        let len = self.entries.len() as isize;
+        self.selected = (selected + delta).rem_euclid(len) as usize;
+        self.fix_offset();
+    }
+
+    /// Adjust offset to make sure the selected item is visible.
+    fn fix_offset(&mut self) {
+        let offset = self.offset as isize;
+        let selected = self.selected as isize;
+        let h = self.list_size.height as isize;
+        let first_visible = offset;
+        let last_visible = offset + h - 1;
+        let new_offset =
+            if selected < first_visible {
+                selected
+            } else if last_visible < selected {
+                selected - h + 1
+            } else {
+                offset
+            };
+        self.offset = new_offset as usize;
     }
 }
 
 impl WidgetRef for App {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
-        let layout = compute_layout(area);
-
+        let (heading_rect, list_rect) = compute_layout(area);
         { // Heading
             let mut string = "--- ".to_string();
             string.push_str(
@@ -166,31 +210,43 @@ impl WidgetRef for App {
                         None => "#",
                         Some(path) => path.as_str(),
                     },
-                    area.width as usize - string.len()
+                    heading_rect.width as usize - string.len()
                 ).as_ref()
             );
             let mut remaining_width = max(
                 0,
-                area.width as isize - 4 - string.len() as isize
+                heading_rect.width as isize - 4 - string.len() as isize
             ) as usize;
             if remaining_width > 0 {
                 string.push(' ');
                 remaining_width -= 1;
             }
             string.push_str(&"-".repeat(remaining_width));
-            Paragraph::new(string).render_ref(area, buf);
+            Paragraph::new(string).render_ref(heading_rect, buf);
         }
 
-        self.files.render_ref(layout[1], buf);
+        { // List
+            let items = self.entries
+                .iter()
+                .enumerate()
+                .skip(self.offset)
+                .map(|(index, entry)| { ListItem::new(
+                    entry.to_line(
+                        self.list_size.width,
+                        index == self.selected
+                    )
+                )});
+            List::new(items).render_ref(list_rect, buf)
+        }
     }
 }
 
-/// `files` is expected to be sorted by size, largest first.
-fn to_listitems(files: Vec<Entry>) -> Vec<ListEntry> {
-    if files.is_empty() { return Vec::new() }
+/// `entries` is expected to be sorted by size, largest first.
+fn to_list_entries(entries: Vec<Entry>) -> Vec<ListEntry> {
+    if entries.is_empty() { return Vec::new() }
 
-    let largest = files[0].size() as f64;
-    files
+    let largest = entries[0].size() as f64;
+    entries
         .into_iter()
         .map(|e| match e {
             Entry::File(File{ path, size }) => ListEntry {
@@ -209,22 +265,20 @@ fn to_listitems(files: Vec<Entry>) -> Vec<ListEntry> {
         .collect()
 }
 
-fn compute_layout(area: Rect) -> Rc<[Rect]> {
-    Layout::default()
+fn compute_sizes(area: Size) -> (Size, Size) {
+    let (heading, list) = compute_layout((Position::new(0, 0), area).into());
+    (heading.as_size(), list.as_size())
+}
+
+fn compute_layout(area: Rect) -> (Rect, Rect) {
+    let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),
             Constraint::Fill(100),
         ])
-        .split(area)
-}
-
-fn compute_dimensions(dimensions: (u16, u16)) -> Box<[(u16, u16)]> {
-    let layout = compute_layout(Rect {
-        x: 0, y: 0,
-        width: dimensions.0, height: dimensions.1
-    });
-    layout.iter().map(|r| (r.width, r.height)).collect()
+        .split(area);
+    (layout[0], layout[1])
 }
 
 fn path_push(o_path: &mut Option<Utf8PathBuf>, name: &Utf8Path) {

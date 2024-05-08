@@ -3,7 +3,6 @@ use ratatui::text::Line;
 use std::borrow::Cow;
 use unicode_segmentation::UnicodeSegmentation;
 
-mod list;
 pub mod app;
 
 #[derive(Debug)]
