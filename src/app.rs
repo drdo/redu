@@ -424,6 +424,7 @@ mod tests {
         assert_eq!(
             f.to_line(80, false),
             Line::from(vec![
+                Span::raw(" "),
                 Span::raw(" 999.99 KiB"),
                 Span::raw(" [##############  ] "),
                 Span::raw("1234567890123456789012345678901234567890")
@@ -432,6 +433,7 @@ mod tests {
         assert_eq!(
             f.to_line(2, false),
             Line::from(vec![
+                Span::raw(" "),
                 Span::raw(" 999.99 KiB"),
                 Span::raw(" [##############  ] "),
                 Span::raw("")
@@ -451,6 +453,7 @@ mod tests {
         assert_eq!(
             f.to_line(80, false),
             Line::from(vec![
+                Span::raw(" "),
                 Span::raw("      9 KiB"),
                 Span::raw(" [##############  ] "),
                 Span::raw("1234567890123456789012345678901234567890")
@@ -459,6 +462,7 @@ mod tests {
         assert_eq!(
             f.to_line(2, false),
             Line::from(vec![
+                Span::raw(" "),
                 Span::raw("      9 KiB"),
                 Span::raw(" [##############  ] "),
                 Span::raw("")
@@ -478,6 +482,7 @@ mod tests {
         assert_eq!(
             f.to_line(80, false),
             Line::from(vec![
+                Span::raw(" "),
                 Span::raw("   9.99 KiB"),
                 Span::raw(" [##############  ] "),
                 Span::raw("1234567890123456789012345678901234567890/")
@@ -487,6 +492,7 @@ mod tests {
         assert_eq!(
             f.to_line(2, false),
             Line::from(vec![
+                Span::raw(" "),
                 Span::raw("   9.99 KiB"),
                 Span::raw(" [##############  ] "),
                 Span::raw("")
@@ -507,6 +513,7 @@ mod tests {
         assert_eq!(
             f.to_line(80, true),
             Line::from(vec![
+                Span::raw(" "),
                 Span::raw(" 999.99 KiB"),
                 Span::raw(" [##############  ] "),
                 Span::raw("1234567890123456789012345678901234567890")
@@ -515,6 +522,7 @@ mod tests {
         assert_eq!(
             f.to_line(2, true),
             Line::from(vec![
+                Span::raw(" "),
                 Span::raw(" 999.99 KiB"),
                 Span::raw(" [##############  ] "),
                 Span::raw("")
@@ -534,6 +542,7 @@ mod tests {
         assert_eq!(
             f.to_line(80, true),
             Line::from(vec![
+                Span::raw(" "),
                 Span::raw("   9.99 KiB"),
                 Span::raw(" [##############  ] "),
                 Span::raw("1234567890123456789012345678901234567890/")
@@ -543,6 +552,7 @@ mod tests {
         assert_eq!(
             f.to_line(2, true),
             Line::from(vec![
+                Span::raw(" "),
                 Span::raw("   9.99 KiB"),
                 Span::raw(" [##############  ] "),
                 Span::raw("")
