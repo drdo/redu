@@ -5,7 +5,6 @@ use unicode_segmentation::UnicodeSegmentation;
 
 mod list;
 pub mod app;
-mod heading;
 
 #[derive(Debug)]
 pub enum Event {

@@ -18,10 +18,9 @@ use ratatui::{CompletedFrame, Terminal};
 use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::widgets::WidgetRef;
 
-use component::app::App;
-
 use crate::cache::Cache;
 use crate::component::{Action, Event};
+use crate::component::app::App;
 use crate::restic::Restic;
 use crate::types::Entry;
 

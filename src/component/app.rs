@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 use std::cmp::{max, min};
-use std::fmt::{Display, Formatter};
 use std::rc::Rc;
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -9,23 +8,11 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::prelude::Line;
 use ratatui::style::{Style, Stylize};
 use ratatui::text::Span;
-use ratatui::widgets::WidgetRef;
+use ratatui::widgets::{Paragraph, WidgetRef};
 
 use crate::component::{Action, Event, shorten_to, ToLine};
-use crate::component::heading::Heading;
 use crate::component::list::List;
 use crate::types::{Directory, Entry, File};
-
-struct PathItem(Option<Utf8PathBuf>);
-
-impl Display for PathItem {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match &self.0 {
-            None => f.write_fmt(format_args!("#")),
-            Some(path) => f.write_fmt(format_args!("{path}")),
-        }
-    }
-}
 
 struct ListItem {
     name: Utf8PathBuf,
@@ -81,7 +68,7 @@ impl ToLine for ListItem {
 }
 
 pub struct App {
-    heading: Heading<PathItem>,
+    path: Option<Utf8PathBuf>,
     files: List<ListItem>,
 }
 
@@ -95,9 +82,6 @@ impl App {
     where
         P: Into<Cow<'a, Utf8Path>>,
     {
-        let heading = Heading::new(PathItem(
-            path.map(|p| p.into().into_owned())
-        ));
         let list = {
             let layout = compute_layout(Rect {
                 x: 0, y: 0,
@@ -105,7 +89,10 @@ impl App {
             });
             List::new(layout[1].height, to_listitems(files), true)
         };
-        App { heading, files: list }
+        App {
+            path: path.map(|p| p.into().into_owned()),
+            files: list,
+        }
     }
 
     /// The result of `get_files` is expected to be sorted by size, largest first.
@@ -143,9 +130,9 @@ impl App {
     where
         G: FnOnce(Option<&Utf8Path>) -> Result<Vec<Entry>, E>,
     {
-        path_pop(&mut self.heading);
-        self.files.set_items(to_listitems(get_files(self.path())?));
-        log::debug!("path is now {:?}", self.path());
+        path_pop(&mut self.path);
+        self.files.set_items(to_listitems(get_files(self.path.as_deref())?));
+        log::debug!("path is now {:?}", self.path.as_deref());
         Ok(Action::Render)
     }
 
@@ -158,8 +145,8 @@ impl App {
     {
         match self.files.selected_item() {
             Some(ListItem { name, is_dir, ..}) if *is_dir => {
-                path_push(&mut self.heading, name);
-                let files = get_files(self.path().as_deref())?;
+                path_push(&mut self.path, name);
+                let files = get_files(self.path.as_deref())?;
                 self.files.set_items(to_listitems(files));
                 Ok(Action::Render)
             }
@@ -167,17 +154,35 @@ impl App {
                 Ok(Action::Nothing)
         }
     }
-
-    fn path(&self) -> Option<&Utf8Path> {
-        self.heading.item.0.as_deref()
-    }
-
 }
 
 impl WidgetRef for App {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         let layout = compute_layout(area);
-        self.heading.render_ref(layout[0], buf);
+
+        { // Heading
+            let mut string = "--- ".to_string();
+            string.push_str(
+                shorten_to(
+                    match &self.path {
+                        None => "#",
+                        Some(path) => path.as_str(),
+                    },
+                    area.width as usize - string.len()
+                ).as_ref()
+            );
+            let mut remaining_width = max(
+                0,
+                area.width as isize - 4 - string.len() as isize
+            ) as usize;
+            if remaining_width > 0 {
+                string.push(' ');
+                remaining_width -= 1;
+            }
+            string.push_str(&"-".repeat(remaining_width));
+            Paragraph::new(string).render_ref(area, buf);
+        }
+
         self.files.render_ref(layout[1], buf);
     }
 }
@@ -224,18 +229,18 @@ fn compute_dimensions(dimensions: (u16, u16)) -> Box<[(u16, u16)]> {
     layout.iter().map(|r| (r.width, r.height)).collect()
 }
 
-fn path_push(heading: &mut Heading<PathItem>, name: &Utf8Path) {
-    if let Some(path) = &mut heading.item.0 {
+fn path_push(o_path: &mut Option<Utf8PathBuf>, name: &Utf8Path) {
+    if let Some(path) = o_path {
         path.push(name);
     } else {
-        heading.item.0 = Some(name.to_owned());
+        *o_path = Some(name.to_owned());
     }
 }
 
-fn path_pop(heading: &mut Heading<PathItem>) {
-    if let Some(path) = &mut heading.item.0 {
+fn path_pop(o_path: &mut Option<Utf8PathBuf>) {
+    if let Some(path) = o_path {
         if path.parent().is_none() {
-            heading.item.0 = None;
+            *o_path = None;
         } else {
             path.pop();
         }
