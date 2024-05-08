@@ -10,8 +10,8 @@ use ratatui::style::{Style, Stylize};
 use ratatui::text::Span;
 use ratatui::widgets::{List, ListItem, Paragraph, WidgetRef};
 use unicode_segmentation::UnicodeSegmentation;
+use crossterm::event::KeyCode;
 
-use crate::component::{Action, Event};
 use crate::types::{Directory, Entry, File};
 
 struct ListEntry {
@@ -370,4 +370,17 @@ mod tests {
         assert_eq!(shorten_to(s, 8), Cow::Owned::<str>("12...789".to_owned()));
         assert_eq!(shorten_to(s, 9), Cow::Owned::<str>("123456789".to_owned()));
     }
+}
+
+#[derive(Debug)]
+pub enum Event {
+    Resize(u16, u16),
+    KeyPress(KeyCode),
+}
+
+#[derive(Debug)]
+pub enum Action {
+    Nothing,
+    Render,
+    Quit,
 }
