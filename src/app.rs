@@ -327,7 +327,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn list_entry_to_line() {
+    fn list_entry_to_line_large_size_file() {
         let f = ListEntry {
             name: "1234567890123456789012345678901234567890".into(),
             size: 999 * 1024 + 1010,
@@ -349,6 +349,114 @@ mod tests {
                 Span::raw(" [##############  ] "),
                 Span::raw("")
             ])
+        );
+    }
+
+    #[test]
+    fn list_entry_to_line_small_size_file() {
+        let f = ListEntry {
+            name: "1234567890123456789012345678901234567890".into(),
+            size: 9 * 1024,
+            relative_size: 0.9,
+            is_dir: false,
+        };
+        assert_eq!(
+            f.to_line(80, false),
+            Line::from(vec![
+                Span::raw("      9 KiB"),
+                Span::raw(" [##############  ] "),
+                Span::raw("1234567890123456789012345678901234567890")
+            ])
+        );
+        assert_eq!(
+            f.to_line(2, false),
+            Line::from(vec![
+                Span::raw("      9 KiB"),
+                Span::raw(" [##############  ] "),
+                Span::raw("")
+            ])
+        );
+    }
+
+    #[test]
+    fn list_entry_to_line_directory() {
+        let f = ListEntry {
+            name: "1234567890123456789012345678901234567890".into(),
+            size: 9 * 1024 + 1010,
+            relative_size: 0.9,
+            is_dir: true,
+        };
+        assert_eq!(
+            f.to_line(80, false),
+            Line::from(vec![
+                Span::raw("   9.99 KiB"),
+                Span::raw(" [##############  ] "),
+                Span::raw("1234567890123456789012345678901234567890/")
+                    .bold().blue()
+            ])
+        );
+        assert_eq!(
+            f.to_line(2, false),
+            Line::from(vec![
+                Span::raw("   9.99 KiB"),
+                Span::raw(" [##############  ] "),
+                Span::raw("")
+                    .bold().blue()
+            ])
+        );
+    }
+
+    #[test]
+    fn list_entry_to_line_file_selected() {
+        let f = ListEntry {
+            name: "1234567890123456789012345678901234567890".into(),
+            size: 999 * 1024 + 1010,
+            relative_size: 0.9,
+            is_dir: false,
+        };
+        assert_eq!(
+            f.to_line(80, true),
+            Line::from(vec![
+                Span::raw(" 999.99 KiB"),
+                Span::raw(" [##############  ] "),
+                Span::raw("1234567890123456789012345678901234567890")
+            ]).black().on_white()
+        );
+        assert_eq!(
+            f.to_line(2, true),
+            Line::from(vec![
+                Span::raw(" 999.99 KiB"),
+                Span::raw(" [##############  ] "),
+                Span::raw("")
+            ]).black().on_white()
+        );
+    }
+
+    #[test]
+    fn list_entry_to_line_directory_selected() {
+        let f = ListEntry {
+            name: "1234567890123456789012345678901234567890".into(),
+            size: 9 * 1024 + 1010,
+            relative_size: 0.9,
+            is_dir: true,
+        };
+        assert_eq!(
+            f.to_line(80, true),
+            Line::from(vec![
+                Span::raw("   9.99 KiB"),
+                Span::raw(" [##############  ] "),
+                Span::raw("1234567890123456789012345678901234567890/")
+                    .bold().dark_gray()
+            ]).black().on_white()
+        );
+        assert_eq!(
+            f.to_line(2, true),
+            Line::from(vec![
+                Span::raw("   9.99 KiB"),
+                Span::raw(" [##############  ] "),
+                Span::raw("")
+                    .bold().dark_gray()
+            ]).black().on_white()
         );
     }
 
