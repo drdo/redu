@@ -10,7 +10,7 @@ use ratatui::style::{Style, Stylize};
 use ratatui::text::Span;
 use ratatui::widgets::{List, ListItem, Paragraph, WidgetRef};
 
-use crate::component::{Action, Event, shorten_to, ToLine};
+use crate::component::{Action, Event, shorten_to};
 use crate::types::{Directory, Entry, File};
 
 struct ListEntry {
@@ -20,7 +20,7 @@ struct ListEntry {
     is_dir: bool,
 }
 
-impl ToLine for ListEntry {
+impl ListEntry {
     fn to_line(&self, width: u16, selected: bool) -> Line {
         let size_span = Span::raw(
             format!(" {:>10}", humansize::format_size(self.size, humansize::BINARY))

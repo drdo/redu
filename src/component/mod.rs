@@ -1,5 +1,4 @@
 use crossterm::event::KeyCode;
-use ratatui::text::Line;
 use std::borrow::Cow;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -16,10 +15,6 @@ pub enum Action {
     Nothing,
     Render,
     Quit,
-}
-
-trait ToLine {
-    fn to_line(&self, width: u16, selected: bool) -> Line;
 }
 
 fn shorten_to(s: &str, width: usize) -> Cow<str> {
