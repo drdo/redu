@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::cmp;
+use std::iter;
 use std::cmp::{max, min};
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -80,10 +80,10 @@ impl ListEntry {
 }
 
 pub struct App {
+    path: Option<Utf8PathBuf>,
+    entries: Vec<Entry>,
     heading_size: Size,
     list_size: Size,
-    path: Option<Utf8PathBuf>,
-    entries: Vec<ListEntry>,
     selected: usize,
     offset: usize,
 }
@@ -93,7 +93,7 @@ impl App {
     pub fn new<'a, P>(
         screen: Size,
         path: Option<P>,
-        files: Vec<Entry>,
+        entries: Vec<Entry>,
     ) -> Self
     where
         P: Into<Cow<'a, Utf8Path>>,
@@ -103,7 +103,7 @@ impl App {
             heading_size,
             list_size,
             path: path.map(|p| p.into().into_owned()),
-            entries: to_list_entries(files),
+            entries,
             selected: 0,
             offset: 0,
         }
@@ -162,12 +162,16 @@ impl App {
         where
             G: FnOnce(Option<&Utf8Path>) -> Result<Vec<Entry>, E>,
     {
-        if !self.entries.is_empty() && self.entries[self.selected].is_dir {
-            let name = &self.entries[self.selected].name;
-            path_push(&mut self.path, name);
-            let files = get_entries(self.path.as_deref())?;
-            self.set_entries(files);
-            Ok(Action::Render)
+        if !self.entries.is_empty() {
+            match &self.entries[self.selected] {
+                Entry::Directory(Directory{ path, .. }) => {
+                    path_push(&mut self.path, &path);
+                    let files = get_entries(self.path.as_deref())?;
+                    self.set_entries(files);
+                    Ok(Action::Render)
+                }
+                _ => Ok(Action::Nothing),
+            }
         } else {
             Ok(Action::Nothing)
         }
@@ -175,10 +179,10 @@ impl App {
 
     /// `entries` is expected to be sorted by size, largest first.
     pub fn set_entries(&mut self, entries: Vec<Entry>) {
-        self.entries = to_list_entries(entries);
-        self.selected = cmp::max(
+        self.entries = entries;
+        self.selected = max(
             0,
-            cmp::min(
+            min(
                 self.entries.len() as isize - 1,
                 self.selected as isize
             ),
@@ -241,7 +245,8 @@ impl WidgetRef for App {
         }
 
         { // List
-            let items = self.entries
+            let list_entries = to_list_entries(self.entries.iter());
+            let items = list_entries
                 .iter()
                 .enumerate()
                 .skip(self.offset)
@@ -257,27 +262,33 @@ impl WidgetRef for App {
 }
 
 /// `entries` is expected to be sorted by size, largest first.
-fn to_list_entries(entries: Vec<Entry>) -> Vec<ListEntry> {
-    if entries.is_empty() { return Vec::new() }
-
-    let largest = entries[0].size() as f64;
-    entries
-        .into_iter()
-        .map(|e| match e {
-            Entry::File(File{ path, size }) => ListEntry {
-                name: path,
-                size,
-                relative_size: size as f64 / largest,
-                is_dir: false,
-            },
-            Entry::Directory(Directory{ path, size }) => ListEntry {
-                name: path,
-                size,
-                relative_size: size as f64 / largest,
-                is_dir: true,
-            },
-        })
-        .collect()
+fn to_list_entries<'a, I>(entries: I) -> Vec<ListEntry>
+where
+    I: IntoIterator<Item=&'a Entry>
+{
+    let mut entries = entries.into_iter();
+    match entries.next() {
+        None => Vec::new(),
+        Some(first) => {
+            let largest = first.size() as f64;
+            iter::once(first).chain(entries)
+                .map(|e| match e {
+                    Entry::File(File{ path, size }) => ListEntry {
+                        name: path.clone(),
+                        size: *size,
+                        relative_size: *size as f64 / largest,
+                        is_dir: false,
+                    },
+                    Entry::Directory(Directory{ path, size }) => ListEntry {
+                        name: path.clone(),
+                        size: *size,
+                        relative_size: *size as f64 / largest,
+                        is_dir: true,
+                    },
+                })
+                .collect()
+        }
+    }
 }
 
 fn compute_sizes(area: Size) -> (Size, Size) {
