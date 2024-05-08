@@ -18,10 +18,10 @@ use ratatui::{CompletedFrame, Terminal};
 use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::widgets::WidgetRef;
 
-use app::Action;
-use app::Event;
+use ui::Action;
+use ui::Event;
 
-use crate::app::App;
+use crate::ui::App;
 use crate::cache::Cache;
 use crate::restic::Restic;
 use crate::types::Entry;
@@ -29,7 +29,7 @@ use crate::types::Entry;
 mod cache;
 mod restic;
 mod types;
-pub mod app;
+pub mod ui;
 
 macro_rules! with_greedy_stderr_logging {
     ($expr:expr) => {
@@ -85,7 +85,7 @@ fn handle_event(
 fn convert_event(event: crossterm::event::Event) -> Option<Event> {
     use crossterm::event::Event as TermEvent;
     use crossterm::event::KeyEventKind::{Press, Release};
-    use app::Event::*;
+    use ui::Event::*;
     match event {
         TermEvent::Resize(w, h) =>
             Some(Resize(w, h)),
