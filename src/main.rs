@@ -9,6 +9,7 @@ use std::panic;
 
 use camino::Utf8Path;
 use clap::{command, Parser};
+use crossterm::event::KeyCode;
 use crossterm::ExecutableCommand;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use flexi_logger::{FileSpec, Logger, WriteMode};
@@ -16,6 +17,7 @@ use futures::TryStreamExt;
 use log::error;
 use ratatui::{CompletedFrame, Terminal};
 use ratatui::backend::{Backend, CrosstermBackend};
+use ratatui::layout::Size;
 use ratatui::widgets::WidgetRef;
 
 use ui::Action;
@@ -88,9 +90,29 @@ fn convert_event(event: crossterm::event::Event) -> Option<Event> {
     use ui::Event::*;
     match event {
         TermEvent::Resize(w, h) =>
-            Some(Resize(w, h)),
-        TermEvent::Key(event) if [Press, Release].contains(&event.kind) =>
-            Some(KeyPress(event.code)),
+            Some(Resize(Size::new(w, h))),
+        TermEvent::Key(event) if [Press, Release].contains(&event.kind) => {
+            match event.code {
+                KeyCode::Left => Some(Left),
+                KeyCode::Char('h') => Some(Left),
+
+                KeyCode::Right => Some(Right),
+                KeyCode::Char(';') => Some(Right),
+
+                KeyCode::Up => Some(Up),
+                KeyCode::Char('k') => Some(Up),
+
+                KeyCode::Down => Some(Down),
+                KeyCode::Char('j') => Some(Down),
+
+                KeyCode::Char('m') => Some(Mark),
+                KeyCode::Char('u') => Some(Unmark),
+                KeyCode::Char('q') => Some(Quit),
+                KeyCode::Char('g') => Some(Generate),
+
+                _ => None,
+            }
+        }
         _ => None,
     }
 }
@@ -166,10 +188,10 @@ async fn main() {
         disable_raw_mode().unwrap();
         prev(info);
     });
+
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout())).unwrap();
     terminal.clear().unwrap();
     
-    let mut terminal_events = crossterm::event::EventStream::new();
     let mut app = {
         let rect = terminal.size().unwrap();
         App::new(
@@ -182,6 +204,7 @@ async fn main() {
     let mut output_lines = vec![];
 
     render(&mut terminal, &app).unwrap();
+    let mut terminal_events = crossterm::event::EventStream::new();
     while let Some(event) = terminal_events.try_next().await.unwrap() {
         if let Some(event) = convert_event(event) {
             match handle_event(&cache, &mut app, event).unwrap() {

@@ -11,14 +11,20 @@ use ratatui::style::{Style, Stylize};
 use ratatui::text::Span;
 use ratatui::widgets::{List, ListItem, Paragraph, WidgetRef};
 use unicode_segmentation::UnicodeSegmentation;
-use crossterm::event::KeyCode;
 
 use crate::types::{Directory, Entry, File};
 
 #[derive(Debug)]
 pub enum Event {
-    Resize(u16, u16),
-    KeyPress(KeyCode),
+    Resize(Size),
+    Left,
+    Right,
+    Up,
+    Down,
+    Mark,
+    Unmark,
+    Quit,
+    Generate,
 }
 
 #[derive(Debug)]
@@ -72,26 +78,15 @@ impl App {
     {
         log::debug!("received {:?}", event);
         use Event::*;
-        use crossterm::event::KeyCode::*;
         match event {
-            Resize(w, h) => Ok(self.resize(Size::new(w, h))),
-
-            KeyPress(Char('q')) => Ok(Action::Quit),
-
-            KeyPress(Right) => self.right(get_entries),
-            KeyPress(Char(';')) => self.right(get_entries),
-            KeyPress(Left) => self.left(get_entries),
-            KeyPress(Char('h')) => self.left(get_entries),
-
-            KeyPress(Up) => { Ok(self.move_selection(-1)) },
-            KeyPress(Char('k')) => { Ok(self.move_selection(-1)) }
-            KeyPress(Down) => { Ok(self.move_selection(1)) }
-            KeyPress(Char('j')) => { Ok(self.move_selection(1)) }
-
-            KeyPress(Char('m')) => { Ok(self.mark_selection()) }
-            KeyPress(Char('u')) => { Ok(self.unmark_selection()) }
-
-            KeyPress(Char('g')) => { Ok(self.generate()) }
+            Resize(new_size) => Ok(self.resize(new_size)),
+            Left => self.left(get_entries),
+            Right => self.right(get_entries),
+            Up => { Ok(self.move_selection(-1)) },
+            Mark => { Ok(self.mark_selection()) }
+            Unmark => { Ok(self.unmark_selection()) }
+            Quit => Ok(Action::Quit),
+            Generate => { Ok(self.generate()) }
 
             _ => Ok(Action::Nothing)
         }
