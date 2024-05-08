@@ -14,14 +14,14 @@ use crate::component::{Action, Event, shorten_to, ToLine};
 use crate::component::list::List;
 use crate::types::{Directory, Entry, File};
 
-struct ListItem {
+struct ListEntry {
     name: Utf8PathBuf,
     size: usize,
     relative_size: f64,
     is_dir: bool,
 }
 
-impl ToLine for ListItem {
+impl ToLine for ListEntry {
     fn to_line(&self, width: u16, selected: bool) -> Line {
         let size_span = Span::raw(
             format!(" {:>10}", humansize::format_size(self.size, humansize::BINARY))
@@ -67,7 +67,7 @@ impl ToLine for ListItem {
 
 pub struct App {
     path: Option<Utf8PathBuf>,
-    files: List<ListItem>,
+    files: List<ListEntry>,
 }
 
 impl App {
@@ -142,7 +142,7 @@ impl App {
             G: FnOnce(Option<&Utf8Path>) -> Result<Vec<Entry>, E>,
     {
         match self.files.selected_item() {
-            Some(ListItem { name, is_dir, ..}) if *is_dir => {
+            Some(ListEntry { name, is_dir, ..}) if *is_dir => {
                 path_push(&mut self.path, name);
                 let files = get_files(self.path.as_deref())?;
                 self.files.set_items(to_listitems(files));
@@ -186,20 +186,20 @@ impl WidgetRef for App {
 }
 
 /// `files` is expected to be sorted by size, largest first.
-fn to_listitems(files: Vec<Entry>) -> Vec<ListItem> {
+fn to_listitems(files: Vec<Entry>) -> Vec<ListEntry> {
     if files.is_empty() { return Vec::new() }
 
     let largest = files[0].size() as f64;
     files
         .into_iter()
         .map(|e| match e {
-            Entry::File(File{ path, size }) => ListItem {
+            Entry::File(File{ path, size }) => ListEntry {
                 name: path,
                 size,
                 relative_size: size as f64 / largest,
                 is_dir: false,
             },
-            Entry::Directory(Directory{ path, size }) => ListItem {
+            Entry::Directory(Directory{ path, size }) => ListEntry {
                 name: path,
                 size,
                 relative_size: size as f64 / largest,
@@ -251,7 +251,7 @@ mod tests {
 
     #[test]
     fn fileitem_to_line() {
-        let f = ListItem {
+        let f = ListEntry {
             name: "1234567890123456789012345678901234567890".into(),
             size: 999 * 1024 + 1010,
             relative_size: 0.9,
