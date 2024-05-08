@@ -1,4 +1,4 @@
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use serde::Deserialize;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -28,6 +28,13 @@ impl Entry {
         match self {
             Entry::Directory(d) => d.size,
             Entry::File(f) => f.size,
+        }
+    }
+
+    pub fn path(&self) -> &Utf8Path {
+        match self {
+            Entry::Directory(d) => &d.path,
+            Entry::File(f) => &f.path,
         }
     }
 }

@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::iter;
 use std::cmp::{max, min};
+use std::collections::HashSet;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use ratatui::buffer::Buffer;
@@ -30,6 +31,7 @@ pub enum Action {
 pub struct App {
     path: Option<Utf8PathBuf>,
     entries: Vec<Entry>,
+    marks: HashSet<Utf8PathBuf>,
     heading_size: Size,
     list_size: Size,
     selected: usize,
@@ -48,10 +50,11 @@ impl App {
     {
         let (heading_size, list_size) = compute_sizes(screen);
         App {
-            heading_size,
-            list_size,
             path: path.map(|p| p.into().into_owned()),
             entries,
+            marks: HashSet::new(),
+            heading_size,
+            list_size,
             selected: 0,
             offset: 0,
         }
@@ -70,27 +73,34 @@ impl App {
         use Event::*;
         use crossterm::event::KeyCode::*;
         match event {
-            Resize(w, h) => Ok(self.handle_resize(Size::new(w, h))),
+            Resize(w, h) => Ok(self.resize(Size::new(w, h))),
+
             KeyPress(Char('q')) => Ok(Action::Quit),
-            KeyPress(Right) => self.handle_right(get_entries),
-            KeyPress(Char(';')) => self.handle_right(get_entries),
-            KeyPress(Left) => self.handle_left(get_entries),
-            KeyPress(Char('h')) => self.handle_left(get_entries),
-            KeyPress(Up) => { self.move_selection(-1); Ok(Action::Render) },
-            KeyPress(Char('k')) => { self.move_selection(-1); Ok(Action::Render) }
-            KeyPress(Down) => { self.move_selection(1); Ok(Action::Render) }
-            KeyPress(Char('j')) => { self.move_selection(1); Ok(Action::Render) }
+
+            KeyPress(Right) => self.right(get_entries),
+            KeyPress(Char(';')) => self.right(get_entries),
+            KeyPress(Left) => self.left(get_entries),
+            KeyPress(Char('h')) => self.left(get_entries),
+
+            KeyPress(Up) => { Ok(self.move_selection(-1)) },
+            KeyPress(Char('k')) => { Ok(self.move_selection(-1)) }
+            KeyPress(Down) => { Ok(self.move_selection(1)) }
+            KeyPress(Char('j')) => { Ok(self.move_selection(1)) }
+
+            KeyPress(Char('m')) => { Ok(self.mark_selection()) }
+            KeyPress(Char('u')) => { Ok(self.unmark_selection()) }
+
             _ => Ok(Action::Nothing)
         }
     }
 
-    fn handle_resize(&mut self, new_size: Size) -> Action {
+    fn resize(&mut self, new_size: Size) -> Action {
         (self.heading_size, self.list_size) = compute_sizes(new_size);
         self.fix_offset();
         Action::Render
     }
 
-    fn handle_left<E, G>(
+    fn left<E, G>(
         &mut self,
         get_entries: G,
     ) -> Result<Action, E>
@@ -103,7 +113,7 @@ impl App {
         Ok(Action::Render)
     }
 
-    fn handle_right<E, G>(
+    fn right<E, G>(
         &mut self,
         get_entries: G,
     ) -> Result<Action, E>
@@ -125,6 +135,35 @@ impl App {
         }
     }
 
+    fn move_selection(&mut self, delta: isize) -> Action {
+        if self.entries.is_empty() { return Action::Nothing }
+
+        let selected = self.selected as isize;
+        let len = self.entries.len() as isize;
+        self.selected = (selected + delta).rem_euclid(len) as usize;
+        self.fix_offset();
+
+        Action::Render
+    }
+
+    fn mark_selection(&mut self) -> Action {
+        if self.entries.is_empty() { return Action::Nothing }
+
+        self.marks.insert(
+            path_extended(self.path.as_deref(),
+                          self.entries[self.selected].path()));
+        Action::Render
+    }
+
+    fn unmark_selection(&mut self) -> Action {
+        if self.entries.is_empty() { return Action::Nothing }
+
+        self.marks.remove(
+            &path_extended(self.path.as_deref(),
+                           self.entries[self.selected].path()));
+        Action::Render
+    }
+
     /// `entries` is expected to be sorted by size, largest first.
     pub fn set_entries(&mut self, entries: Vec<Entry>) {
         self.entries = entries;
@@ -136,15 +175,6 @@ impl App {
             ),
         ) as usize;
         self.offset = 0;
-    }
-
-    fn move_selection(&mut self, delta: isize) {
-        if self.entries.is_empty() { return }
-
-        let selected = self.selected as isize;
-        let len = self.entries.len() as isize;
-        self.selected = (selected + delta).rem_euclid(len) as usize;
-        self.fix_offset();
     }
 
     /// Adjust offset to make sure the selected item is visible.
@@ -174,6 +204,12 @@ fn path_push(o_path: &mut Option<Utf8PathBuf>, name: &Utf8Path) {
     }
 }
 
+fn path_extended(o_path: Option<&Utf8Path>, more: &Utf8Path) -> Utf8PathBuf {
+    let mut full_path = o_path.map(Utf8Path::to_path_buf).unwrap_or_default();
+    full_path.push(more);
+    full_path
+}
+
 fn path_pop(o_path: &mut Option<Utf8PathBuf>) {
     if let Some(path) = o_path {
         if path.parent().is_none() {
@@ -191,14 +227,26 @@ struct ListEntry {
     size: usize,
     relative_size: f64,
     is_dir: bool,
+    is_marked: bool,
 }
 
 impl ListEntry {
     fn to_line(&self, width: u16, selected: bool) -> Line {
-        let size_span = Span::raw(
+        let mut spans = Vec::with_capacity(4);
+
+        // Mark
+        spans.push(Span::raw(
+            if self.is_marked { "*" }
+            else { " " }
+        ));
+
+        // Size
+        spans.push(Span::raw(
             format!(" {:>10}", humansize::format_size(self.size, humansize::BINARY))
-        );
-        let bar_span = Span::raw({
+        ));
+
+        // Bar
+        spans.push(Span::raw({
             let max_bar_width: usize = max(16, min(24, (0.1 * width as f64) as usize));
             let bar_width = (self.relative_size * max_bar_width as f64) as usize;
             let bar = format!(
@@ -208,10 +256,12 @@ impl ListEntry {
                 empty_bar_size = max_bar_width - bar_width
             );
             bar
-        });
-        let name_span = {
+        }));
+
+        // Name
+        spans.push({
             let available_width = {
-                let used = size_span.content.len() + bar_span.content.len();
+                let used: usize = spans.iter().map(|s| s.content.len()).sum();
                 max(0, width as isize - used as isize) as usize
             };
             if self.is_dir
@@ -227,13 +277,12 @@ impl ListEntry {
             } else {
                 Span::raw(shorten_to(self.name.as_str(), available_width))
             }
-        };
-        let style = if selected {
-            Style::new().black().on_white()
-        } else {
-            Style::new()
-        };
-        Line::from(vec![size_span, bar_span, name_span]).style(style)
+        });
+
+        Line::from(spans).style(
+            if selected { Style::new().black().on_white() }
+            else { Style::new() }
+        )
     }
 }
 
@@ -264,7 +313,12 @@ impl WidgetRef for App {
         }
 
         { // List
-            let list_entries = to_list_entries(self.entries.iter());
+            let list_entries = to_list_entries(
+                |p| {
+                    self.marks.contains(&path_extended(self.path.as_deref(), p))
+                },
+                self.entries.iter(),
+            );
             let items = list_entries
                 .iter()
                 .enumerate()
@@ -281,9 +335,10 @@ impl WidgetRef for App {
 }
 
 /// `entries` is expected to be sorted by size, largest first.
-fn to_list_entries<'a, I>(entries: I) -> Vec<ListEntry>
-where
-    I: IntoIterator<Item=&'a Entry>
+fn to_list_entries<'a>(
+    mut is_marked: impl FnMut(&Utf8Path) -> bool,
+    entries: impl IntoIterator<Item=&'a Entry>,
+) -> Vec<ListEntry>
 {
     let mut entries = entries.into_iter();
     match entries.next() {
@@ -291,19 +346,20 @@ where
         Some(first) => {
             let largest = first.size() as f64;
             iter::once(first).chain(entries)
-                .map(|e| match e {
-                    Entry::File(File{ path, size }) => ListEntry {
+                .map(|e| {
+                    let (path, size, is_dir) = match e {
+                        Entry::File(File{ path, size }) =>
+                            (path, size, false),
+                        Entry::Directory(Directory{ path, size }) =>
+                            (path, size, true),
+                    };
+                    ListEntry {
                         name: path.clone(),
                         size: *size,
                         relative_size: *size as f64 / largest,
-                        is_dir: false,
-                    },
-                    Entry::Directory(Directory{ path, size }) => ListEntry {
-                        name: path.clone(),
-                        size: *size,
-                        relative_size: *size as f64 / largest,
-                        is_dir: true,
-                    },
+                        is_dir,
+                        is_marked: is_marked(path),
+                    }
                 })
                 .collect()
         }
@@ -363,6 +419,7 @@ mod tests {
             size: 999 * 1024 + 1010,
             relative_size: 0.9,
             is_dir: false,
+            is_marked: false,
         };
         assert_eq!(
             f.to_line(80, false),
@@ -389,6 +446,7 @@ mod tests {
             size: 9 * 1024,
             relative_size: 0.9,
             is_dir: false,
+            is_marked: false,
         };
         assert_eq!(
             f.to_line(80, false),
@@ -415,6 +473,7 @@ mod tests {
             size: 9 * 1024 + 1010,
             relative_size: 0.9,
             is_dir: true,
+            is_marked: false,
         };
         assert_eq!(
             f.to_line(80, false),
@@ -443,6 +502,7 @@ mod tests {
             size: 999 * 1024 + 1010,
             relative_size: 0.9,
             is_dir: false,
+            is_marked: false,
         };
         assert_eq!(
             f.to_line(80, true),
@@ -469,6 +529,7 @@ mod tests {
             size: 9 * 1024 + 1010,
             relative_size: 0.9,
             is_dir: true,
+            is_marked: false,
         };
         assert_eq!(
             f.to_line(80, true),
