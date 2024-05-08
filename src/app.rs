@@ -14,7 +14,6 @@ use crossterm::event::KeyCode;
 
 use crate::types::{Directory, Entry, File};
 
-
 #[derive(Debug)]
 pub enum Event {
     Resize(u16, u16),
@@ -26,57 +25,6 @@ pub enum Action {
     Nothing,
     Render,
     Quit,
-}
-
-struct ListEntry {
-    name: Utf8PathBuf,
-    size: usize,
-    relative_size: f64,
-    is_dir: bool,
-}
-
-impl ListEntry {
-    fn to_line(&self, width: u16, selected: bool) -> Line {
-        let size_span = Span::raw(
-            format!(" {:>10}", humansize::format_size(self.size, humansize::BINARY))
-        );
-        let bar_span = Span::raw({
-            let max_bar_width: usize = max(16, min(24, (0.1 * width as f64) as usize));
-            let bar_width = (self.relative_size * max_bar_width as f64) as usize;
-            let bar = format!(
-                " [{:#^bar_size$}{:empty_bar_size$}] ",
-                "", "",
-                bar_size = bar_width,
-                empty_bar_size = max_bar_width - bar_width
-            );
-            bar
-        });
-        let name_span = {
-            let available_width = {
-                let used = size_span.content.len() + bar_span.content.len();
-                max(0, width as isize - used as isize) as usize
-            };
-            if self.is_dir
-            {
-                let mut name = Cow::Borrowed(self.name.as_str());
-                if name.chars().last() != Some('/') {
-                    name.to_mut().push('/');
-                }
-                let span = Span::raw(shorten_to(&name, available_width).into_owned())
-                    .bold();
-                if selected { span.dark_gray() }
-                else { span.blue() }
-            } else {
-                Span::raw(shorten_to(self.name.as_str(), available_width))
-            }
-        };
-        let style = if selected {
-            Style::new().black().on_white()
-        } else {
-            Style::new()
-        };
-        Line::from(vec![size_span, bar_span, name_span]).style(style)
-    }
 }
 
 pub struct App {
@@ -218,6 +166,77 @@ impl App {
     }
 }
 
+fn path_push(o_path: &mut Option<Utf8PathBuf>, name: &Utf8Path) {
+    if let Some(path) = o_path {
+        path.push(name);
+    } else {
+        *o_path = Some(name.to_owned());
+    }
+}
+
+fn path_pop(o_path: &mut Option<Utf8PathBuf>) {
+    if let Some(path) = o_path {
+        if path.parent().is_none() {
+            *o_path = None;
+        } else {
+            path.pop();
+        }
+    }
+}
+
+/// Render /////////////////////////////////////////////////////////////////////
+
+struct ListEntry {
+    name: Utf8PathBuf,
+    size: usize,
+    relative_size: f64,
+    is_dir: bool,
+}
+
+impl ListEntry {
+    fn to_line(&self, width: u16, selected: bool) -> Line {
+        let size_span = Span::raw(
+            format!(" {:>10}", humansize::format_size(self.size, humansize::BINARY))
+        );
+        let bar_span = Span::raw({
+            let max_bar_width: usize = max(16, min(24, (0.1 * width as f64) as usize));
+            let bar_width = (self.relative_size * max_bar_width as f64) as usize;
+            let bar = format!(
+                " [{:#^bar_size$}{:empty_bar_size$}] ",
+                "", "",
+                bar_size = bar_width,
+                empty_bar_size = max_bar_width - bar_width
+            );
+            bar
+        });
+        let name_span = {
+            let available_width = {
+                let used = size_span.content.len() + bar_span.content.len();
+                max(0, width as isize - used as isize) as usize
+            };
+            if self.is_dir
+            {
+                let mut name = Cow::Borrowed(self.name.as_str());
+                if name.chars().last() != Some('/') {
+                    name.to_mut().push('/');
+                }
+                let span = Span::raw(shorten_to(&name, available_width).into_owned())
+                    .bold();
+                if selected { span.dark_gray() }
+                else { span.blue() }
+            } else {
+                Span::raw(shorten_to(self.name.as_str(), available_width))
+            }
+        };
+        let style = if selected {
+            Style::new().black().on_white()
+        } else {
+            Style::new()
+        };
+        Line::from(vec![size_span, bar_span, name_span]).style(style)
+    }
+}
+
 impl WidgetRef for App {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         let (heading_rect, list_rect) = compute_layout(area);
@@ -291,40 +310,6 @@ where
     }
 }
 
-fn compute_sizes(area: Size) -> (Size, Size) {
-    let (heading, list) = compute_layout((Position::new(0, 0), area).into());
-    (heading.as_size(), list.as_size())
-}
-
-fn compute_layout(area: Rect) -> (Rect, Rect) {
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Fill(100),
-        ])
-        .split(area);
-    (layout[0], layout[1])
-}
-
-fn path_push(o_path: &mut Option<Utf8PathBuf>, name: &Utf8Path) {
-    if let Some(path) = o_path {
-        path.push(name);
-    } else {
-        *o_path = Some(name.to_owned());
-    }
-}
-
-fn path_pop(o_path: &mut Option<Utf8PathBuf>) {
-    if let Some(path) = o_path {
-        if path.parent().is_none() {
-            *o_path = None;
-        } else {
-            path.pop();
-        }
-    }
-}
-
 fn shorten_to(s: &str, width: usize) -> Cow<str> {
     let len = s.graphemes(true).count();
     let res = if len <= width {
@@ -343,6 +328,26 @@ fn shorten_to(s: &str, width: usize) -> Cow<str> {
     };
     res
 }
+
+/// Misc //////////////////////////////////////////////////////////////////////
+
+fn compute_sizes(area: Size) -> (Size, Size) {
+    let (heading, list) = compute_layout((Position::new(0, 0), area).into());
+    (heading.as_size(), list.as_size())
+}
+
+fn compute_layout(area: Rect) -> (Rect, Rect) {
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Fill(100),
+        ])
+        .split(area);
+    (layout[0], layout[1])
+}
+
+/// Tests //////////////////////////////////////////////////////////////////////
 
 #[cfg(test)]
 mod tests {
