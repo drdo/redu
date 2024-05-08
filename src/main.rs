@@ -178,11 +178,18 @@ async fn main() {
             get_files(&cache, None).unwrap(),
         )
     };
+
+    let mut output_lines = vec![];
+
     render(&mut terminal, &app).unwrap();
     while let Some(event) = terminal_events.try_next().await.unwrap() {
         if let Some(event) = convert_event(event) {
             match handle_event(&cache, &mut app, event).unwrap() {
                 Action::Quit => break,
+                Action::Generate(lines) => {
+                    output_lines = lines;
+                    break
+                }
                 Action::Render => { render(&mut terminal, &app).unwrap(); },
                 Action::Nothing => {},
             }
@@ -191,4 +198,8 @@ async fn main() {
     
     disable_raw_mode().unwrap();
     stdout().execute(LeaveAlternateScreen).unwrap();
+
+    for line in output_lines {
+        println!("{line}");
+    }
 }

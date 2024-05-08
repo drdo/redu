@@ -26,6 +26,7 @@ pub enum Action {
     Nothing,
     Render,
     Quit,
+    Generate(Vec<Box<str>>),
 }
 
 pub struct App {
@@ -89,6 +90,8 @@ impl App {
 
             KeyPress(Char('m')) => { Ok(self.mark_selection()) }
             KeyPress(Char('u')) => { Ok(self.unmark_selection()) }
+
+            KeyPress(Char('g')) => { Ok(self.generate()) }
 
             _ => Ok(Action::Nothing)
         }
@@ -162,6 +165,15 @@ impl App {
             &path_extended(self.path.as_deref(),
                            self.entries[self.selected].path()));
         Action::Render
+    }
+
+    fn generate(&self) -> Action {
+        let mut lines = self.marks
+            .iter()
+            .map(|p| Box::from(p.as_str()))
+            .collect::<Vec<_>>();
+        lines.sort_unstable();
+        Action::Generate(lines)
     }
 
     /// `entries` is expected to be sorted by size, largest first.
