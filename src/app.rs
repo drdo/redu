@@ -14,6 +14,20 @@ use crossterm::event::KeyCode;
 
 use crate::types::{Directory, Entry, File};
 
+
+#[derive(Debug)]
+pub enum Event {
+    Resize(u16, u16),
+    KeyPress(KeyCode),
+}
+
+#[derive(Debug)]
+pub enum Action {
+    Nothing,
+    Render,
+    Quit,
+}
+
 struct ListEntry {
     name: Utf8PathBuf,
     size: usize,
@@ -472,17 +486,4 @@ mod tests {
         assert_eq!(shorten_to(s, 8), Cow::Owned::<str>("12...789".to_owned()));
         assert_eq!(shorten_to(s, 9), Cow::Borrowed(s));
     }
-}
-
-#[derive(Debug)]
-pub enum Event {
-    Resize(u16, u16),
-    KeyPress(KeyCode),
-}
-
-#[derive(Debug)]
-pub enum Action {
-    Nothing,
-    Render,
-    Quit,
 }
