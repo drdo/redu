@@ -53,7 +53,7 @@ impl ListEntry {
                 if selected { span.dark_gray() }
                 else { span.blue() }
             } else {
-                Span::raw(self.name.as_str())
+                Span::raw(shorten_to(self.name.as_str(), available_width))
             }
         };
         let style = if selected {
@@ -300,29 +300,6 @@ fn path_pop(o_path: &mut Option<Utf8PathBuf>) {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fileitem_to_line() {
-        let f = ListEntry {
-            name: "1234567890123456789012345678901234567890".into(),
-            size: 999 * 1024 + 1010,
-            relative_size: 0.9,
-            is_dir: false,
-        };
-        assert_eq!(
-            f.to_line(80),
-            Line::raw(" 999.99 KiB [##############  ] 1234567890123456789012345678901234567890".to_owned())
-        );
-        assert_eq!(
-            f.to_line(2),
-            Line::raw(" 999.99 KiB [##############  ] ".to_owned())
-        );
-    }
-}
-
 fn shorten_to(s: &str, width: usize) -> Cow<str> {
     let len = s.graphemes(true).count();
     let res = if len <= width {
@@ -350,25 +327,42 @@ mod tests {
     use super::*;
 
     #[test]
-    fn shorten_to_len_lt_width() {
-        let s = "12345";
-        assert_eq!(shorten_to(s, 6), Cow::Borrowed(s));
+    fn fileitem_to_line() {
+        let f = ListEntry {
+            name: "1234567890123456789012345678901234567890".into(),
+            size: 999 * 1024 + 1010,
+            relative_size: 0.9,
+            is_dir: false,
+        };
+        assert_eq!(
+            f.to_line(80, false),
+            Line::from(vec![
+                Span::raw(" 999.99 KiB"),
+                Span::raw(" [##############  ] "),
+                Span::raw("1234567890123456789012345678901234567890")
+            ])
+        );
+        assert_eq!(
+            f.to_line(2, false),
+            Line::from(vec![
+                Span::raw(" 999.99 KiB"),
+                Span::raw(" [##############  ] "),
+                Span::raw("")
+            ])
+        );
     }
 
     #[test]
-    fn shorten_to_width_lt_3() {
-        let s = "12345";
-        assert_eq!(shorten_to(s, 2), Cow::Owned::<str>("..".to_owned()));
-    }
-
-    #[test]
-    fn shorten_to_width_lte_len() {
+    fn shorten_to_test() {
         let s = "123456789";
+        assert_eq!(shorten_to(s, 0), Cow::Owned::<str>("".to_owned()));
+        assert_eq!(shorten_to(s, 1), Cow::Owned::<str>(".".to_owned()));
+        assert_eq!(shorten_to(s, 2), Cow::Owned::<str>("..".to_owned()));
         assert_eq!(shorten_to(s, 3), Cow::Owned::<str>("...".to_owned()));
         assert_eq!(shorten_to(s, 4), Cow::Owned::<str>("...9".to_owned()));
         assert_eq!(shorten_to(s, 5), Cow::Owned::<str>("1...9".to_owned()));
         assert_eq!(shorten_to(s, 8), Cow::Owned::<str>("12...789".to_owned()));
-        assert_eq!(shorten_to(s, 9), Cow::Owned::<str>("123456789".to_owned()));
+        assert_eq!(shorten_to(s, 9), Cow::Borrowed(s));
     }
 }
 
