@@ -165,6 +165,18 @@ impl App {
         entries: Vec<Entry>
     ) -> Action
     {
+        self.selected =
+            if let Some(old_path) = &self.path {
+                entries
+                    .iter()
+                    .enumerate()
+                    .find(|(i, e)| Some(e.path().as_str()) == old_path.file_name())
+                    .map(|(i, _)| i)
+                    .unwrap_or(0)
+            } else {
+                0
+            };
+        self.offset = 0;
         self.path = parent;
         self.entries = entries;
         self.selected = max(
@@ -174,8 +186,6 @@ impl App {
                 self.selected as isize
             ),
         ) as usize;
-        self.selected = 0;
-        self.offset = 0;
         Action::Render
     }
 
