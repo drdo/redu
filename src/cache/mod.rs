@@ -161,6 +161,7 @@ impl Cache {
     pub fn delete_snapshot(&mut self, id: &str) -> Result<(), rusqlite::Error> {
         let tx = self.conn.transaction()?;
         tx.execute("DELETE FROM files WHERE snapshot = ?", params![id])?;
+        tx.execute("DELETE FROM directories WHERE snapshot = ?", params![id])?;
         tx.execute("DELETE FROM snapshots WHERE id = ?", params![id])?;
         tx.commit()
     }
