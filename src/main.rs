@@ -138,8 +138,8 @@ async fn main() {
         eprintln!("Need to fetch {} snapshot(s)", snapshots.len());
         for (snapshot, i) in snapshots.iter().zip(1..) {
             eprintln!("Fetching snapshot {:?} [{}/{}]", &snapshot, i, snapshots.len());
-            let mut files = restic.ls(&snapshot).await;
             let handle = cache.start_snapshot(&snapshot).unwrap();
+            let mut files = restic.ls(&snapshot);
             while let Some(f) = files.try_next().await.unwrap() {
                 handle.insert_file(&f.path, f.size).unwrap()
             }

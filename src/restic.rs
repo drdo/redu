@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::ffi::{OsStr, OsString};
 use std::future::Future;
 use std::pin::Pin;
 use std::process::{ExitStatus, Stdio};
@@ -97,7 +98,7 @@ impl Restic {
         self.run_greedy_command(["snapshots"]).await
     }
 
-    pub async fn ls<'a>(
+    pub fn ls<'a>(
         &'a self,
         snapshot: &str,
     ) -> Pin<Box<dyn Stream<Item=Result<File, Error>> + 'a>>
@@ -110,19 +111,31 @@ impl Restic {
             })
         }
 
+        Box::pin(self.run_lazy_command::<Value, _>(["ls", snapshot])
+            .try_filter_map(|value| async move { Ok(parse_file(value)) }))
+    }
+
+    pub fn run_lazy_command<'a, T, A>(
+        &'a self,
+        args: impl IntoIterator<Item=A>,
+    ) -> Pin<Box<dyn Stream<Item=Result<T, Error>> + 'a>>
+    where
+        T: DeserializeOwned,
+        OsString: From<A>,
+    {
         // We are creating a Stream that produces another Stream and flattening it
         // The point is to run the restic process as part of awaiting
         // on the first element of the stream
-        let snapshot = Box::from(snapshot);
+        let args = args
+            .into_iter()
+            .map(OsString::from)
+            .collect::<Vec<OsString>>();
         let wrapped_stream = stream::once(async move {
-            let handle = self.run_command(["ls", &snapshot]).await?;
+            let handle = self.run_command(args).await?;
 
             // This stream produces the entries
             let entries = FramedRead::new(handle.stdout, LinesCodec::new())
-                .err_into()
-                .try_filter_map(|line| async move {
-                    Ok(parse_file(serde_json::from_str::<Value>(line.as_str())?))
-                });
+                .map(|line| Ok(serde_json::from_str(line?.as_str())?));
             // This stream checks if the status is ok and then produces
             // either nothing or an error.
             let wait = Rc::new(RefCell::new(handle.wait));
@@ -155,10 +168,13 @@ impl Restic {
         Box::pin(wrapped_stream.try_flatten())
     }
 
-    async fn run_greedy_command<'a, T: DeserializeOwned>(
+    async fn run_greedy_command<'a, T, A>(
         &self,
-        args: impl IntoIterator<Item=&'a str>,
+        args: impl IntoIterator<Item=A>,
     ) -> Result<T, Error>
+    where
+        T: DeserializeOwned,
+        A: AsRef<OsStr> + 'static,
     {
         let mut handle = self.run_command(args).await?;
         let r_value = try {
@@ -184,9 +200,9 @@ impl Restic {
         }
     }
 
-    async fn run_command<'a>(
+    async fn run_command<'a, A: AsRef<OsStr> + 'static>(
         &self,
-        args: impl IntoIterator<Item=&'a str>,
+        args: impl IntoIterator<Item=A>,
     ) -> Result<Handle, Error>
     {
         let mut cmd = Command::new("restic");
