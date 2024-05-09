@@ -26,7 +26,6 @@ use ui::Event;
 use crate::ui::App;
 use crate::cache::Cache;
 use crate::restic::Restic;
-use crate::types::Entry;
 
 mod cache;
 mod restic;
@@ -55,15 +54,6 @@ struct Cli {
     password_command: Option<String>,
 }
 
-
-fn get_files(
-    cache: &Cache,
-    path: Option<&Utf8Path>,
-) -> Result<Vec<Entry>, rusqlite::Error>
-{
-    cache.get_max_file_sizes(path)
-}
-
 fn render<'a>(
     terminal: &'a mut Terminal<impl Backend>,
     app: &App,
@@ -73,15 +63,6 @@ fn render<'a>(
         let buf = frame.buffer_mut();
         app.render_ref(area, buf)
     })
-}
-
-fn handle_event(
-    cache: &Cache,
-    app: &mut App,
-    event: Event,
-) -> Result<Action, rusqlite::Error>
-{
-    app.handle_event(|path| get_files(cache, path), event)
 }
 
 fn convert_event(event: crossterm::event::Event) -> Option<Event> {
@@ -197,7 +178,7 @@ async fn main() {
         App::new(
             rect.as_size(),
             None::<Cow<Utf8Path>>,
-            get_files(&cache, None).unwrap(),
+            cache.get_max_file_sizes(None::<&str>).unwrap(),
         )
     };
 
@@ -205,16 +186,24 @@ async fn main() {
 
     render(&mut terminal, &app).unwrap();
     let mut terminal_events = crossterm::event::EventStream::new();
-    while let Some(event) = terminal_events.try_next().await.unwrap() {
-        if let Some(event) = convert_event(event) {
-            match handle_event(&cache, &mut app, event).unwrap() {
-                Action::Quit => break,
+    'outer: while let Some(event) = terminal_events.try_next().await.unwrap() {
+        let mut o_event = convert_event(event);
+        while let Some(event) = o_event {
+            o_event = match app.handle_event(event) {
+                Action::Nothing => None,
+                Action::Render => { render(&mut terminal, &app).unwrap(); None },
+                Action::Quit => break 'outer,
                 Action::Generate(lines) => {
                     output_lines = lines;
-                    break
+                    break 'outer
                 }
-                Action::Render => { render(&mut terminal, &app).unwrap(); },
-                Action::Nothing => {},
+                Action::GetEntries(path) => {
+                    let children = cache.get_max_file_sizes(path.as_deref()).unwrap();
+                    Some(Event::Entries {
+                        parent: path,
+                        children
+                    })
+                }
             }
         }
     }

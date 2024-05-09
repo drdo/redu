@@ -25,6 +25,10 @@ pub enum Event {
     Unmark,
     Quit,
     Generate,
+    Entries { /// `children` is expected to be sorted by size, largest first.
+        parent: Option<Utf8PathBuf>,
+        children: Vec<Entry>,
+    }
 }
 
 #[derive(Debug)]
@@ -33,6 +37,7 @@ pub enum Action {
     Render,
     Quit,
     Generate(Vec<Box<str>>),
+    GetEntries(Option<Utf8PathBuf>),
 }
 
 pub struct App {
@@ -46,7 +51,7 @@ pub struct App {
 }
 
 impl App {
-    /// `files` is expected to be sorted by size, largest first.
+    /// `entries` is expected to be sorted by size, largest first.
     pub fn new<'a, P>(
         screen: Size,
         path: Option<P>,
@@ -67,28 +72,21 @@ impl App {
         }
     }
 
-    /// The result of `get_files` is expected to be sorted by size, largest first.
-    pub fn handle_event<E, G>(
-        &mut self,
-        get_entries: G,
-        event: Event,
-    ) -> Result<Action, E>
-    where
-        G: FnOnce(Option<&Utf8Path>) -> Result<Vec<Entry>, E>,
+    pub fn handle_event(&mut self, event: Event) -> Action
     {
         log::debug!("received {:?}", event);
         use Event::*;
         match event {
-            Resize(new_size) => Ok(self.resize(new_size)),
-            Left => self.left(get_entries),
-            Right => self.right(get_entries),
-            Up => { Ok(self.move_selection(-1)) },
-            Mark => { Ok(self.mark_selection()) }
-            Unmark => { Ok(self.unmark_selection()) }
-            Quit => Ok(Action::Quit),
-            Generate => { Ok(self.generate()) }
-
-            _ => Ok(Action::Nothing)
+            Resize(new_size) => self.resize(new_size),
+            Left => self.left(),
+            Right => self.right(),
+            Up => self.move_selection(-1),
+            Down => self.move_selection(1),
+            Mark => self.mark_selection(),
+            Unmark => self.unmark_selection(),
+            Quit => Action::Quit,
+            Generate => self.generate(),
+            Entries { parent, children } => self.set_entries(parent, children),
         }
     }
 
@@ -98,38 +96,26 @@ impl App {
         Action::Render
     }
 
-    fn left<E, G>(
-        &mut self,
-        get_entries: G,
-    ) -> Result<Action, E>
-    where
-        G: FnOnce(Option<&Utf8Path>) -> Result<Vec<Entry>, E>,
-    {
-        path_pop(&mut self.path);
-        self.set_entries(get_entries(self.path.as_deref())?);
-        log::debug!("path is now {:?}", self.path.as_deref());
-        Ok(Action::Render)
+    fn left(&mut self) -> Action {
+        match &self.path {
+            None =>
+                Action::Nothing,
+            Some(path) =>
+                Action::GetEntries(path.parent().map(Utf8Path::to_path_buf)),
+        }
     }
 
-    fn right<E, G>(
-        &mut self,
-        get_entries: G,
-    ) -> Result<Action, E>
-        where
-            G: FnOnce(Option<&Utf8Path>) -> Result<Vec<Entry>, E>,
-    {
+    fn right(&mut self) -> Action {
         if !self.entries.is_empty() {
             match &self.entries[self.selected] {
                 Entry::Directory(Directory{ path, .. }) => {
-                    path_push(&mut self.path, &path);
-                    let files = get_entries(self.path.as_deref())?;
-                    self.set_entries(files);
-                    Ok(Action::Render)
+                    let new_path = path_extended(self.path.as_deref(), &path);
+                    Action::GetEntries(Some(new_path.into_owned()))
                 }
-                _ => Ok(Action::Nothing),
+                _ => Action::Nothing,
             }
         } else {
-            Ok(Action::Nothing)
+            Action::Nothing
         }
     }
 
@@ -147,9 +133,11 @@ impl App {
     fn mark_selection(&mut self) -> Action {
         if self.entries.is_empty() { return Action::Nothing }
 
-        self.marks.insert(
-            path_extended(self.path.as_deref(),
-                          self.entries[self.selected].path()));
+        let full_path = path_extended(
+            self.path.as_deref(),
+            self.entries[self.selected].path()
+        ).into_owned();
+        self.marks.insert(full_path);
         Action::Render
     }
 
@@ -157,8 +145,8 @@ impl App {
         if self.entries.is_empty() { return Action::Nothing }
 
         self.marks.remove(
-            &path_extended(self.path.as_deref(),
-                           self.entries[self.selected].path()));
+            path_extended(self.path.as_deref(),
+                          self.entries[self.selected].path()).as_ref());
         Action::Render
     }
 
@@ -171,8 +159,13 @@ impl App {
         Action::Generate(lines)
     }
 
-    /// `entries` is expected to be sorted by size, largest first.
-    pub fn set_entries(&mut self, entries: Vec<Entry>) {
+    pub fn set_entries(
+        &mut self,
+        parent: Option<Utf8PathBuf>,
+        entries: Vec<Entry>
+    ) -> Action
+    {
+        self.path = parent;
         self.entries = entries;
         self.selected = max(
             0,
@@ -181,7 +174,9 @@ impl App {
                 self.selected as isize
             ),
         ) as usize;
+        self.selected = 0;
         self.offset = 0;
+        Action::Render
     }
 
     /// Adjust offset to make sure the selected item is visible.
@@ -211,10 +206,19 @@ fn path_push(o_path: &mut Option<Utf8PathBuf>, name: &Utf8Path) {
     }
 }
 
-fn path_extended(o_path: Option<&Utf8Path>, more: &Utf8Path) -> Utf8PathBuf {
-    let mut full_path = o_path.map(Utf8Path::to_path_buf).unwrap_or_default();
-    full_path.push(more);
-    full_path
+fn path_extended<'a>(
+    o_path: Option<&Utf8Path>,
+    more: &'a Utf8Path
+) -> Cow<'a, Utf8Path>
+{
+    match o_path {
+        None => Cow::Borrowed(more),
+        Some(path) => {
+            let mut full_path = path.to_path_buf();
+            full_path.push(more);
+            Cow::Owned(full_path)
+        }
+    }
 }
 
 fn path_pop(o_path: &mut Option<Utf8PathBuf>) {
@@ -321,9 +325,9 @@ impl WidgetRef for App {
 
         { // List
             let list_entries = to_list_entries(
-                |p| {
-                    self.marks.contains(&path_extended(self.path.as_deref(), p))
-                },
+                |p| self.marks.contains(
+                    path_extended(self.path.as_deref(), p).as_ref()
+                ),
                 self.entries.iter(),
             );
             let items = list_entries

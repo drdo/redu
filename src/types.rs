@@ -18,6 +18,7 @@ pub struct Directory {
     pub size: usize,
 }
 
+#[derive(Debug)]
 pub enum Entry {
     Directory(Directory),
     File(File),
