@@ -32,19 +32,6 @@ mod restic;
 mod types;
 pub mod ui;
 
-macro_rules! with_greedy_stderr_logging {
-    ($expr:expr) => {
-        {
-            use futures::StreamExt;
-            let (x, mut stderr_stream) = $expr;
-            while let Some(line) = stderr_stream.next().await {
-                error!("stderr: {}", line.unwrap())
-            }
-            x
-        }
-    };
-}
-
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Cli {
@@ -115,9 +102,12 @@ async fn main() {
     }
 
     let cli = Cli::parse();
-    let restic = Restic::new(&cli.repo, cli.password_command.as_ref().map(|s| s.as_str()));
+    let restic = Restic::new(
+        cli.repo,
+        cli.password_command
+    );
     eprintln!("Getting restic config");
-    let repo_id = restic.config().await.0.unwrap().id;
+    let repo_id = restic.config().await.unwrap().id;
     let mut cache = Cache::open(repo_id.as_str()).unwrap();
     
     eprintln!("Using cache file '{}'", cache.filename());
@@ -125,7 +115,7 @@ async fn main() {
     // Figure out what snapshots we need to update
     let snapshots: Vec<Box<str>> = {
         eprintln!("Fetching restic snapshot list");
-        let restic_snapshots = with_greedy_stderr_logging!(restic.snapshots().await)
+        let restic_snapshots = restic.snapshots().await
             .unwrap()
             .into_iter()
             .map(|s| s.id)
@@ -148,7 +138,7 @@ async fn main() {
         eprintln!("Need to fetch {} snapshot(s)", snapshots.len());
         for (snapshot, i) in snapshots.iter().zip(1..) {
             eprintln!("Fetching snapshot {:?} [{}/{}]", &snapshot, i, snapshots.len());
-            let (mut files, _) = restic.ls(&snapshot).await;
+            let mut files = restic.ls(&snapshot).await;
             let handle = cache.start_snapshot(&snapshot).unwrap();
             while let Some(f) = files.try_next().await.unwrap() {
                 handle.insert_file(&f.path, f.size).unwrap()
