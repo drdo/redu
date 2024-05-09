@@ -28,7 +28,8 @@ pub enum Event {
     Entries { /// `children` is expected to be sorted by size, largest first.
         parent: Option<Utf8PathBuf>,
         children: Vec<Entry>,
-    }
+    },
+    Marks(Vec<Utf8PathBuf>),
 }
 
 #[derive(Debug)]
@@ -38,6 +39,8 @@ pub enum Action {
     Quit,
     Generate(Vec<Box<str>>),
     GetEntries(Option<Utf8PathBuf>),
+    UpsertMark(Utf8PathBuf),
+    DeleteMark(Utf8PathBuf),
 }
 
 pub struct App {
@@ -56,6 +59,7 @@ impl App {
         screen: Size,
         path: Option<P>,
         entries: Vec<Entry>,
+        marks: Vec<Utf8PathBuf>,
     ) -> Self
     where
         P: Into<Cow<'a, Utf8Path>>,
@@ -64,7 +68,7 @@ impl App {
         App {
             path: path.map(|p| p.into().into_owned()),
             entries,
-            marks: HashSet::new(),
+            marks: HashSet::from_iter(marks.into_iter()),
             heading_size,
             list_size,
             selected: 0,
@@ -87,6 +91,7 @@ impl App {
             Quit => Action::Quit,
             Generate => self.generate(),
             Entries { parent, children } => self.set_entries(parent, children),
+            Marks(new_marks) => self.set_marks(new_marks),
         }
     }
 
@@ -131,23 +136,15 @@ impl App {
     }
 
     fn mark_selection(&mut self) -> Action {
-        if self.entries.is_empty() { return Action::Nothing }
-
-        let full_path = path_extended(
-            self.path.as_deref(),
-            self.entries[self.selected].path()
-        ).into_owned();
-        self.marks.insert(full_path);
-        Action::Render
+        self.selected_entry()
+            .map(Action::UpsertMark)
+            .unwrap_or(Action::Nothing)
     }
 
     fn unmark_selection(&mut self) -> Action {
-        if self.entries.is_empty() { return Action::Nothing }
-
-        self.marks.remove(
-            path_extended(self.path.as_deref(),
-                          self.entries[self.selected].path()).as_ref());
-        Action::Render
+        self.selected_entry()
+            .map(Action::DeleteMark)
+            .unwrap_or(Action::Nothing)
     }
 
     fn generate(&self) -> Action {
@@ -179,6 +176,11 @@ impl App {
         Action::Render
     }
 
+    fn set_marks(&mut self, new_marks: Vec<Utf8PathBuf>) -> Action {
+        self.marks = HashSet::from_iter(new_marks.into_iter());
+        Action::Render
+    }
+
     /// Adjust offset to make sure the selected item is visible.
     fn fix_offset(&mut self) {
         let offset = self.offset as isize;
@@ -195,6 +197,16 @@ impl App {
                 offset
             };
         self.offset = new_offset as usize;
+    }
+
+    fn selected_entry(&self) -> Option<Utf8PathBuf> {
+        if self.entries.is_empty() { return None }
+
+        let full_path = path_extended(
+            self.path.as_deref(),
+            self.entries[self.selected].path()
+        ).into_owned();
+        Some(full_path)
     }
 }
 

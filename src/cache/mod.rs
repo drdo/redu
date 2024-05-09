@@ -165,6 +165,29 @@ impl Cache {
         tx.execute("DELETE FROM snapshots WHERE id = ?", params![id])?;
         tx.commit()
     }
+
+    pub fn get_marks(&self) -> Result<Vec<Utf8PathBuf>, rusqlite::Error> {
+        let mut stmt = self.conn.prepare("SELECT path FROM marks")?;
+        let result = stmt
+            .query_map([], |row| Ok(row.get::<&str, String>("path")?.into()))?
+            .collect();
+        result
+    }
+
+    pub fn upsert_mark(&mut self, path: &Utf8Path) -> Result<usize, rusqlite::Error> {
+        self.conn.execute(
+            "INSERT INTO marks (path) VALUES (?) \
+             ON CONFLICT (path) DO NOTHING",
+            [path.as_str()]
+        )
+    }
+
+    pub fn delete_mark(&mut self, path: &Utf8Path) -> Result<usize, rusqlite::Error> {
+        self.conn.execute(
+            "DELETE FROM marks WHERE path = ?",
+            [path.as_str()]
+        )
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////

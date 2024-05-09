@@ -179,6 +179,7 @@ async fn main() {
             rect.as_size(),
             None::<Cow<Utf8Path>>,
             cache.get_max_file_sizes(None::<&str>).unwrap(),
+            cache.get_marks().unwrap(),
         )
     };
 
@@ -190,9 +191,14 @@ async fn main() {
         let mut o_event = convert_event(event);
         while let Some(event) = o_event {
             o_event = match app.update(event) {
-                Action::Nothing => None,
-                Action::Render => { render(&mut terminal, &app).unwrap(); None },
-                Action::Quit => break 'outer,
+                Action::Nothing =>
+                    None,
+                Action::Render => {
+                    render(&mut terminal, &app).unwrap();
+                    None
+                }
+                Action::Quit =>
+                    break 'outer,
                 Action::Generate(lines) => {
                     output_lines = lines;
                     break 'outer
@@ -203,6 +209,14 @@ async fn main() {
                         parent: path,
                         children
                     })
+                }
+                Action::UpsertMark(path) => {
+                    cache.upsert_mark(&path).unwrap();
+                    Some(Event::Marks(cache.get_marks().unwrap()))
+                }
+                Action::DeleteMark(path) => {
+                    cache.delete_mark(&path).unwrap();
+                    Some(Event::Marks(cache.get_marks().unwrap()))
                 }
             }
         }

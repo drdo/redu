@@ -28,3 +28,8 @@ CREATE TABLE IF NOT EXISTS directories (
 CREATE TABLE IF NOT EXISTS snapshots (
     id TEXT PRIMARY KEY
 );
+
+-- marks
+CREATE TABLE IF NOT EXISTS marks (
+    path TEXT NOT NULL PRIMARY KEY
+);
