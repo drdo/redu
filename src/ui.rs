@@ -198,14 +198,6 @@ impl App {
     }
 }
 
-fn path_push(o_path: &mut Option<Utf8PathBuf>, name: &Utf8Path) {
-    if let Some(path) = o_path {
-        path.push(name);
-    } else {
-        *o_path = Some(name.to_owned());
-    }
-}
-
 fn path_extended<'a>(
     o_path: Option<&Utf8Path>,
     more: &'a Utf8Path
@@ -217,16 +209,6 @@ fn path_extended<'a>(
             let mut full_path = path.to_path_buf();
             full_path.push(more);
             Cow::Owned(full_path)
-        }
-    }
-}
-
-fn path_pop(o_path: &mut Option<Utf8PathBuf>) {
-    if let Some(path) = o_path {
-        if path.parent().is_none() {
-            *o_path = None;
-        } else {
-            path.pop();
         }
     }
 }
