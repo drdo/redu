@@ -4,7 +4,7 @@
 #![feature(option_get_or_insert_default)]
 
 use std::borrow::Cow;
-use std::io::stdout;
+use std::io::stderr;
 use std::panic;
 
 use camino::Utf8Path;
@@ -160,9 +160,9 @@ async fn main() {
     }
     
     // UI
-    stdout().execute(EnterAlternateScreen).unwrap();
+    stderr().execute(EnterAlternateScreen).unwrap();
     panic::update_hook(|prev, info| {
-        stdout().execute(LeaveAlternateScreen).unwrap();
+        stderr().execute(LeaveAlternateScreen).unwrap();
         prev(info);
     });
     enable_raw_mode().unwrap();
@@ -170,8 +170,7 @@ async fn main() {
         disable_raw_mode().unwrap();
         prev(info);
     });
-
-    let mut terminal = Terminal::new(CrosstermBackend::new(stdout())).unwrap();
+    let mut terminal = Terminal::new(CrosstermBackend::new(stderr())).unwrap();
     terminal.clear().unwrap();
     
     let mut app = {
@@ -228,7 +227,7 @@ async fn main() {
     }
     
     disable_raw_mode().unwrap();
-    stdout().execute(LeaveAlternateScreen).unwrap();
+    stderr().execute(LeaveAlternateScreen).unwrap();
 
     for line in output_lines {
         println!("{line}");
