@@ -170,7 +170,7 @@ impl App {
                 .iter()
                 .map(|e| path_extended(parent.as_deref(), e.path()))
                 .enumerate()
-                .find(|(i, path)| Some(path.as_ref()) == self.path.as_deref())
+                .find(|(_, path)| Some(path.as_ref()) == self.path.as_deref())
                 .map(|(i, _)| i)
                 .unwrap_or(0);
         self.offset = 0;
