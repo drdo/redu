@@ -72,7 +72,7 @@ impl App {
         }
     }
 
-    pub fn handle_event(&mut self, event: Event) -> Action
+    pub fn update(&mut self, event: Event) -> Action
     {
         log::debug!("received {:?}", event);
         use Event::*;

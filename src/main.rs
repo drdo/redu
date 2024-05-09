@@ -189,7 +189,7 @@ async fn main() {
     'outer: while let Some(event) = terminal_events.try_next().await.unwrap() {
         let mut o_event = convert_event(event);
         while let Some(event) = o_event {
-            o_event = match app.handle_event(event) {
+            o_event = match app.update(event) {
                 Action::Nothing => None,
                 Action::Render => { render(&mut terminal, &app).unwrap(); None },
                 Action::Quit => break 'outer,
