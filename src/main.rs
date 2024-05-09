@@ -88,6 +88,7 @@ fn convert_event(event: crossterm::event::Event) -> Option<Event> {
 
                 KeyCode::Char('m') => Some(Mark),
                 KeyCode::Char('u') => Some(Unmark),
+                KeyCode::Char('c') => Some(UnmarkAll),
                 KeyCode::Char('q') => Some(Quit),
                 KeyCode::Char('g') => Some(Generate),
 
@@ -217,6 +218,10 @@ async fn main() {
                 Action::DeleteMark(path) => {
                     cache.delete_mark(&path).unwrap();
                     Some(Event::Marks(cache.get_marks().unwrap()))
+                }
+                Action::DeleteAllMarks => {
+                    cache.delete_all_marks().unwrap();
+                    Some(Event::Marks(Vec::new()))
                 }
             }
         }

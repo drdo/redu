@@ -188,6 +188,10 @@ impl Cache {
             [path.as_str()]
         )
     }
+
+    pub fn delete_all_marks(&mut self) -> Result<usize, rusqlite::Error> {
+        self.conn.execute("DELETE FROM marks", [])
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////

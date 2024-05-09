@@ -23,6 +23,7 @@ pub enum Event {
     Down,
     Mark,
     Unmark,
+    UnmarkAll,
     Quit,
     Generate,
     Entries { /// `children` is expected to be sorted by size, largest first.
@@ -41,6 +42,7 @@ pub enum Action {
     GetEntries(Option<Utf8PathBuf>),
     UpsertMark(Utf8PathBuf),
     DeleteMark(Utf8PathBuf),
+    DeleteAllMarks,
 }
 
 pub struct App {
@@ -88,6 +90,7 @@ impl App {
             Down => self.move_selection(1),
             Mark => self.mark_selection(),
             Unmark => self.unmark_selection(),
+            UnmarkAll => self.unmark_all(),
             Quit => Action::Quit,
             Generate => self.generate(),
             Entries { parent, children } => self.set_entries(parent, children),
@@ -145,6 +148,10 @@ impl App {
         self.selected_entry()
             .map(Action::DeleteMark)
             .unwrap_or(Action::Nothing)
+    }
+
+    fn unmark_all(&self) -> Action {
+        Action::DeleteAllMarks
     }
 
     fn generate(&self) -> Action {
