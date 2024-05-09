@@ -159,7 +159,7 @@ impl App {
         Action::Generate(lines)
     }
 
-    pub fn set_entries(
+    fn set_entries(
         &mut self,
         parent: Option<Utf8PathBuf>,
         entries: Vec<Entry>
