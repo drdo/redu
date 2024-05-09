@@ -16,31 +16,55 @@ use tokio_util::codec::{FramedRead, LinesCodec, LinesCodecError};
 use crate::types::{File, Snapshot};
 
 #[derive(Debug)]
-pub enum Error {
-    Launch(std::io::Error),
+pub struct LaunchError(std::io::Error);
+
+#[derive(Debug)]
+pub enum ErrorKind {
+    Launch(LaunchError),
     Io(std::io::Error),
     MaxLineLengthExceeded,
-    Parse {
-        inner: serde_json::Error,
-        stderr: String,
-    },
-    Exit {
-        status: ExitStatus,
-        stderr: String,
+    Parse(serde_json::Error),
+    Exit(ExitStatus),
+}
+
+impl From<LaunchError> for ErrorKind {
+    fn from(value: LaunchError) -> Self {
+        ErrorKind::Launch(value)
     }
 }
 
-impl From<std::io::Error> for Error {
+impl From<std::io::Error> for ErrorKind {
     fn from(value: std::io::Error) -> Self {
-        Error::Io(value)
+        ErrorKind::Io(value)
     }
 }
 
-impl From<LinesCodecError> for Error {
+impl From<LinesCodecError> for ErrorKind {
     fn from(value: LinesCodecError) -> Self {
         match value {
-            LinesCodecError::MaxLineLengthExceeded => Error::MaxLineLengthExceeded,
-            LinesCodecError::Io(err) => Error::Io(err),
+            LinesCodecError::MaxLineLengthExceeded => ErrorKind::MaxLineLengthExceeded,
+            LinesCodecError::Io(err) => ErrorKind::Io(err),
+        }
+    }
+}
+
+impl From<serde_json::Error> for ErrorKind {
+    fn from(value: serde_json::Error) -> Self {
+        ErrorKind::Parse(value)
+    }
+}
+
+#[derive(Debug)]
+pub struct Error {
+    kind: ErrorKind,
+    stderr: std::io::Result<Option<String>>,
+}
+
+impl From<LaunchError> for Error {
+    fn from(value: LaunchError) -> Self {
+        Error {
+            kind: ErrorKind::Launch(value),
+            stderr: Ok(None),
         }
     }
 }
@@ -65,9 +89,104 @@ impl Restic {
         Restic { repo, password_command }
     }
 
-    /// Panics if we cannot launch restic
+    pub async fn config(&self) -> Result<Config, Error> {
+        self.run_greedy_command(["cat", "config"]).await
+    }
+
+    pub async fn snapshots(&self) -> Result<Vec<Snapshot>, Error> {
+        self.run_greedy_command(["snapshots"]).await
+    }
+
+    pub async fn ls<'a>(
+        &'a self,
+        snapshot: &str,
+    ) -> Pin<Box<dyn Stream<Item=Result<File, Error>> + 'a>>
+    {
+        fn parse_file(mut v: Value) -> Option<File> {
+            let mut m = std::mem::take(v.as_object_mut()?);
+            Some(File {
+                path: Utf8PathBuf::from(m.remove("path")?.as_str()?),
+                size: m.remove("size")?.as_u64()? as usize,
+            })
+        }
+
+        // We are creating a Stream that produces another Stream and flattening it
+        // The point is to run the restic process as part of awaiting
+        // on the first element of the stream
+        let snapshot = Box::from(snapshot);
+        let wrapped_stream = stream::once(async move {
+            let handle = self.run_command(["ls", &snapshot]).await?;
+
+            // This stream produces the entries
+            let entries = FramedRead::new(handle.stdout, LinesCodec::new())
+                .err_into()
+                .try_filter_map(|line| async move {
+                    Ok(parse_file(serde_json::from_str::<Value>(line.as_str())?))
+                });
+            // This stream checks if the status is ok and then produces
+            // either nothing or an error.
+            let wait = Rc::new(RefCell::new(handle.wait));
+            let final_status = stream::try_unfold((), move |()| {
+                let wait = Rc::clone(&wait);
+                async move {
+                    let status = (&mut *wait.borrow_mut()).await?;
+                    if status.success() {
+                        Ok(None)
+                    } else {
+                        Err(ErrorKind::Exit(status))
+                    }
+                }
+            });
+
+            let stderr = Rc::new(RefCell::new(handle.stderr));
+            Ok::<_, Error>(entries
+               .chain(final_status)
+               .or_else(move |kind| {
+                   let stderr = Rc::clone(&stderr);
+                   async move {
+                       Err(Error {
+                           kind,
+                           stderr: (&mut *stderr.borrow_mut()).await.map(Some)
+                       })
+                   }
+               })
+            )
+        });
+        Box::pin(wrapped_stream.try_flatten())
+    }
+
+    async fn run_greedy_command<'a, T: DeserializeOwned>(
+        &self,
+        args: impl IntoIterator<Item=&'a str>,
+    ) -> Result<T, Error>
+    {
+        let mut handle = self.run_command(args).await?;
+        let r_value = try {
+            let stdout = {
+                let mut buf = String::new();
+                handle.stdout.read_to_string(&mut buf).await?;
+                buf
+            };
+            let t = serde_json::from_str(&stdout)?;
+            let status = handle.wait.await?;
+            if status.success() {
+                t
+            } else {
+                Err(ErrorKind::Exit(status))?
+            }
+        };
+        match r_value {
+            Err(e) => Err(Error {
+                kind: e,
+                stderr: handle.stderr.await.map(Some)
+            }),
+            Ok(value) => Ok(value),
+        }
+    }
+
     async fn run_command<'a>(
-        &self, args: impl IntoIterator<Item=&'a str>
+        &self,
+        args: impl IntoIterator<Item=&'a str>,
     ) -> Result<Handle, Error>
     {
         let mut cmd = Command::new("restic");
@@ -84,7 +203,7 @@ impl Restic {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(Error::Launch)?;
+            .map_err(LaunchError)?;
         Ok(Handle {
             stdout: child.stdout.take().unwrap(),
             stderr: {
@@ -98,115 +217,9 @@ impl Restic {
             wait: Box::pin(async move { child.wait().await }),
         })
     }
-
-    pub async fn config(&self) -> Result<Config, Error> {
-        json_from_stdout(self.run_command(["cat", "config"]).await?).await
-    }
-
-    pub async fn snapshots(&self) -> Result<Vec<Snapshot>, Error> {
-        json_from_stdout(self.run_command(["snapshots"]).await?).await
-    }
-
-    pub async fn ls(
-        &self,
-        snapshot: &str,
-    ) -> Pin<Box<dyn Stream<Item=Result<File, Error>> + '_>>
-    {
-        fn parse_file(mut v: Value) -> Option<File> {
-            let mut m = std::mem::take(v.as_object_mut()?);
-            Some(File {
-                path: Utf8PathBuf::from(m.remove("path")?.as_str()?),
-                size: m.remove("size")?.as_u64()? as usize,
-            })
-        }
-
-        // We are creating a Stream that produces another Stream and flattening it
-        // The point is to run the restic process as part of awaiting
-        // on the first element of the stream
-        let snapshot = Box::from(snapshot);
-        let wrapped_stream = stream::once(async move {
-            let handle = self.run_command(["ls", &snapshot]).await?;
-            let stderr = Rc::new(RefCell::new(handle.stderr));
-            let wait = Rc::new(RefCell::new(handle.wait));
-
-            // This stream produces the entries
-            let entries = FramedRead::new(handle.stdout, LinesCodec::new())
-                .err_into()
-                .try_filter_map({
-                    let stderr = Rc::clone(&stderr);
-                    move |line| {
-                        let r_value = serde_json::from_str::<Value>(line.as_str());
-                        let stderr = Rc::clone(&stderr);
-                        async move {
-                            match r_value {
-                                Err(inner) => {
-                                    Err(Error::Parse {
-                                        inner,
-                                        stderr: (&mut *stderr.borrow_mut()).await?
-                                    })
-                                },
-                                Ok(value) => Ok(Some(value))
-                            }
-                        }
-                    }
-                })
-                .try_filter_map(move |value| async {
-                    Ok(parse_file(value))
-                });
-            // This stream checks if the status is ok and then produces
-            // either nothing or an error.
-            let final_status = {
-                stream::try_unfold((), move |()| {
-                    let stderr = Rc::clone(&stderr);
-                    let wait = Rc::clone(&wait);
-                    async move {
-                        let status = (&mut *wait.borrow_mut()).await?;
-                        if status.success() {
-                            Ok(None)
-                        } else {
-                            let x = &mut *stderr.borrow_mut();
-                            let y = x;
-                            Err(Error::Exit {
-                                status,
-                                stderr: y.await?
-                            })
-                        }
-                    }
-                })
-            };
-            Ok::<_, Error>(entries.chain(final_status))
-        });
-        Box::pin(wrapped_stream.try_flatten())
-    }
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
     pub id: String,
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Panics if there is no stdout or no stderr.
-async fn json_from_stdout<T: DeserializeOwned>(
-    mut handle: Handle,
-) -> Result<T, Error>
-{
-    let stdout = {
-        let mut buf = String::new();
-        handle.stdout.read_to_string(&mut buf).await?;
-        buf
-    };
-    let t = match serde_json::from_str(&stdout) {
-        Ok(t) => t,
-        Err(err) => return Err(Error::Parse {
-            inner: err,
-            stderr: handle.stderr.await?
-        })
-    };
-    let status = handle.wait.await?;
-    if status.success() {
-        Ok(t)
-    } else {
-        Err(Error::Exit { status, stderr: handle.stderr.await? })
-    }
 }
