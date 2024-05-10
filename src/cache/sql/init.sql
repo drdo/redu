@@ -1,14 +1,10 @@
-PRAGMA foreign_keys = ON;
-
 -- files
 CREATE TABLE IF NOT EXISTS files (
     snapshot TEXT NOT NULL,
     path TEXT NOT NULL,
     size INTEGER,
     parent TEXT GENERATED ALWAYS AS (path_parent(path)),
-    PRIMARY KEY (snapshot, path),
-    FOREIGN KEY (snapshot) REFERENCES snapshots (id),
-    FOREIGN KEY (snapshot, parent) REFERENCES directories (snapshot, path) DEFERRABLE INITIALLY DEFERRED
+    PRIMARY KEY (snapshot, path)
 );
 
 CREATE INDEX IF NOT EXISTS files_path_parent
@@ -20,8 +16,7 @@ CREATE TABLE IF NOT EXISTS directories (
     path TEXT NOT NULL,
     size INTEGER,
     parent TEXT GENERATED ALWAYS AS (path_parent(path)),
-    PRIMARY KEY (snapshot, path),
-    FOREIGN KEY (snapshot) REFERENCES snapshots (id) DEFERRABLE INITIALLY DEFERRED
+    PRIMARY KEY (snapshot, path)
 );
 
 -- snapshots
