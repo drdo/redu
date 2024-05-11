@@ -135,7 +135,9 @@ async fn main() {
                 .filter(|snapshot| ! repo_snapshots.contains(&snapshot))
                 .collect::<Vec<_>>();
             for snapshot in snapshots_to_delete {
-                let pb = new_spinner("Deleting snapshot {snapshot}");
+                let pb = new_spinner(
+                    format!("Deleting snapshot {}", snapshot_short_id(&snapshot))
+                );
                 cache.delete_snapshot(&snapshot).unwrap();
                 pb.finish();
             }
@@ -151,8 +153,8 @@ async fn main() {
     }
     for (snapshot, i) in missing_snapshots.iter().zip(1..) {
         let pb = new_spinner(format!(
-            "Fetching snapshot {} [{}/{}]",
-            snapshot, i, missing_snapshots.len()
+            "Fetching snapshot {}... [{}/{}]",
+            snapshot_short_id(snapshot), i, missing_snapshots.len()
         ));
         let speed = {
             let pb = pb.clone();
@@ -288,4 +290,8 @@ pub fn new_spinner(prefix: impl Into<Cow<'static, str>>) -> ProgressBar {
     pb.set_prefix(prefix);
     pb.enable_steady_tick(Duration::from_millis(100));
     pb
+}
+
+fn snapshot_short_id(id: &str) -> String {
+    id.chars().take(7).collect::<String>()
 }
