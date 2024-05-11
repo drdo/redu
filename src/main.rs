@@ -129,26 +129,24 @@ async fn main() {
             .map(|s| s.id)
             .collect::<Vec<Box<str>>>();
         pb.finish();
-        { // Delete snapshots from the DB that were deleted on Restic
+        { // Delete snapshots from the DB that were deleted on the repo
             let snapshots_to_delete = cache.get_snapshots()
                 .unwrap()
                 .into_iter()
                 .filter(|snapshot| ! repo_snapshots.contains(&snapshot))
                 .collect::<Vec<_>>();
-                snapshots_to_delete.len();
             for snapshot in snapshots_to_delete {
                 let pb = new_spinner("Deleting snapshot {snapshot}");
                 cache.delete_snapshot(&snapshot).unwrap();
-                pb.inc(1);
                 pb.finish();
             }
         }
-        
+ 
         let db_snapshots = cache.get_snapshots().unwrap();
         repo_snapshots.into_iter().filter(|s| ! db_snapshots.contains(s)).collect()
     };
     
-    // Update snapshots
+    // Fetch missing snapshots
     if snapshots.is_empty() {
         eprintln!("Snapshots up to date");
     }
