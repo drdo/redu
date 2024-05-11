@@ -158,9 +158,11 @@ async fn main() {
         ));
         let speed = {
             let pb = pb.clone();
-            Speed::new(move |v| pb.set_message(
-                format!("{}/s", humansize::format_size_i(v, humansize::BINARY))
-            ))
+            Speed::new(move |v| {
+                let mut msg = humansize::format_size_i(v, humansize::BINARY);
+                msg.push_str("/s");
+                pb.set_message(format!("({msg:>12})"));
+            })
         };
         let handle = cache.start_snapshot(&snapshot).unwrap();
         let mut files = restic.ls(&snapshot);
