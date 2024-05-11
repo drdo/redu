@@ -121,7 +121,7 @@ async fn main() {
     eprintln!("Using cache file '{}'", cache.filename());
 
     // Figure out what snapshots we need to fetch
-    let snapshots: Vec<Box<str>> = {
+    let missing_snapshots: Vec<Box<str>> = {
         let pb = new_spinner("Fetching repository snapshot list");
         let repo_snapshots = restic.snapshots().await
             .unwrap()
@@ -147,12 +147,14 @@ async fn main() {
     };
     
     // Fetch missing snapshots
-    if snapshots.is_empty() {
+    if missing_snapshots.is_empty() {
         eprintln!("Snapshots up to date");
     }
-    for (snapshot, i) in snapshots.iter().zip(1..) {
-        let pb = new_spinner(format!("Fetching snapshot {} [{}/{}]",
-                                     snapshot, i, snapshot.len()));
+    for (snapshot, i) in missing_snapshots.iter().zip(1..) {
+        let pb = new_spinner(format!(
+            "Fetching snapshot {} [{}/{}]",
+            snapshot, i, missing_snapshots.len()
+        ));
         let speed = {
             let pb = pb.clone();
             Speed::new(move |v| pb.set_message(
