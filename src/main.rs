@@ -6,6 +6,8 @@
 use std::borrow::Cow;
 use std::io::stderr;
 use std::panic;
+use std::sync::Arc;
+use std::time::Duration;
 
 use camino::Utf8Path;
 use clap::{command, Parser};
@@ -14,18 +16,21 @@ use crossterm::ExecutableCommand;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use flexi_logger::{FileSpec, Logger, WriteMode};
 use futures::TryStreamExt;
+use indicatif::{ProgressBar, ProgressStyle};
 use log::error;
 use ratatui::{CompletedFrame, Terminal};
 use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::layout::Size;
 use ratatui::widgets::WidgetRef;
+use scopeguard::ScopeGuard;
+use tokio::sync::Mutex;
 
 use ui::Action;
 use ui::Event;
 
-use crate::ui::App;
 use crate::cache::Cache;
 use crate::restic::Restic;
+use crate::ui::App;
 
 mod cache;
 mod restic;
@@ -106,49 +111,66 @@ async fn main() {
         cli.repo,
         cli.password_command
     );
-    eprintln!("Getting restic config");
-    let repo_id = restic.config().await.unwrap().id;
-    let mut cache = Cache::open(repo_id.as_str()).unwrap();
-    
+
+    let mut cache = { // Get config to determine repo id and open cache
+        let pb = new_spinner("Getting restic config");
+        let repo_id = restic.config().await.unwrap().id;
+        pb.finish();
+        Cache::open(repo_id.as_str()).unwrap()
+    };
     eprintln!("Using cache file '{}'", cache.filename());
-    
-    // Figure out what snapshots we need to update
+
+    // Figure out what snapshots we need to fetch
     let snapshots: Vec<Box<str>> = {
-        eprintln!("Fetching restic snapshot list");
-        let restic_snapshots = restic.snapshots().await
+        let pb = new_spinner("Fetching repository snapshot list");
+        let repo_snapshots = restic.snapshots().await
             .unwrap()
             .into_iter()
             .map(|s| s.id)
             .collect::<Vec<Box<str>>>();
-
-        // Delete snapshots from the DB that were deleted on Restic
-        for snapshot in cache.get_snapshots().unwrap() {
-            if ! restic_snapshots.contains(&snapshot) {
-                eprintln!("Deleting DB Snapshot {:?} (missing from restic)", snapshot);
+        pb.finish();
+        { // Delete snapshots from the DB that were deleted on Restic
+            let snapshots_to_delete = cache.get_snapshots()
+                .unwrap()
+                .into_iter()
+                .filter(|snapshot| ! repo_snapshots.contains(&snapshot))
+                .collect::<Vec<_>>();
+                snapshots_to_delete.len();
+            for snapshot in snapshots_to_delete {
+                let pb = new_spinner("Deleting snapshot {snapshot}");
                 cache.delete_snapshot(&snapshot).unwrap();
+                pb.inc(1);
+                pb.finish();
             }
         }
         
         let db_snapshots = cache.get_snapshots().unwrap();
-        restic_snapshots.into_iter().filter(|s| ! db_snapshots.contains(s)).collect()
+        repo_snapshots.into_iter().filter(|s| ! db_snapshots.contains(s)).collect()
     };
     
     // Update snapshots
-    if snapshots.len() > 0 {
-        eprintln!("Need to fetch {} snapshot(s)", snapshots.len());
-        for (snapshot, i) in snapshots.iter().zip(1..) {
-            eprintln!("Fetching snapshot {:?} [{}/{}]", &snapshot, i, snapshots.len());
-            let handle = cache.start_snapshot(&snapshot).unwrap();
-            let mut files = restic.ls(&snapshot);
-            while let Some(f) = files.try_next().await.unwrap() {
-                handle.insert_file(&f.path, f.size).unwrap()
-            }
-            handle.finish().unwrap();
-        }
-    } else {
+    if snapshots.is_empty() {
         eprintln!("Snapshots up to date");
     }
-    
+    for (snapshot, i) in snapshots.iter().zip(1..) {
+        let pb = new_spinner(format!("Fetching snapshot {} [{}/{}]",
+                                     snapshot, i, snapshot.len()));
+        let speed = {
+            let pb = pb.clone();
+            Speed::new(move |v| pb.set_message(
+                format!("{}/s", humansize::format_size_i(v, humansize::BINARY))
+            ))
+        };
+        let handle = cache.start_snapshot(&snapshot).unwrap();
+        let mut files = restic.ls(&snapshot);
+        while let Some((file, bytes_read)) = files.try_next().await.unwrap() {
+            speed.inc(bytes_read).await;
+            handle.insert_file(&file.path, file.size).unwrap()
+        }
+        handle.finish().unwrap();
+        pb.finish();
+    }
+
     // UI
     stderr().execute(EnterAlternateScreen).unwrap();
     panic::update_hook(|prev, info| {
@@ -222,4 +244,49 @@ async fn main() {
     for line in output_lines {
         println!("{line}");
     }
+}
+
+/// Util ///////////////////////////////////////////////////////////////////////
+
+struct Speed {
+    count: Arc<Mutex<usize>>,
+    _guard: ScopeGuard<(), Box<dyn FnOnce(())>>,
+}
+
+impl Speed {
+    pub fn new(mut cb: impl FnMut(f64) + Send + 'static) -> Self {
+        let count = Arc::new(tokio::sync::Mutex::new(0));
+        let handle = {
+            let count = count.clone();
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    let count = {
+                        let count_ref = &mut *count.lock().await;
+                        let tmp = *count_ref;
+                        *count_ref = 0;
+                        tmp
+                    };
+                    cb(count as f64 / 0.5);
+                }
+            })
+        };
+        let _guard = {
+            let dropfn: Box<dyn FnOnce(())> = Box::new(move |()| handle.abort());
+            scopeguard::guard((), dropfn)
+        };
+        Speed { count, _guard }
+    }
+
+    pub async fn inc(&self, delta: usize) {
+        *self.count.lock().await += delta;
+    }
+}
+
+pub fn new_spinner(prefix: impl Into<Cow<'static, str>>) -> ProgressBar {
+    let pb = ProgressBar::new_spinner();
+    pb.set_style(ProgressStyle::with_template("{prefix} {msg} {spinner}").unwrap());
+    pb.set_prefix(prefix);
+    pb.enable_steady_tick(Duration::from_millis(100));
+    pb
 }

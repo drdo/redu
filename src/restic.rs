@@ -101,7 +101,7 @@ impl Restic {
     pub fn ls<'a>(
         &'a self,
         snapshot: &str,
-    ) -> Pin<Box<dyn Stream<Item=Result<File, Error>> + 'a>>
+    ) -> Pin<Box<dyn Stream<Item=Result<(File, usize), Error>> + 'a>>
     {
         fn parse_file(mut v: Value) -> Option<File> {
             let mut m = std::mem::take(v.as_object_mut()?);
@@ -112,13 +112,24 @@ impl Restic {
         }
 
         Box::pin(self.run_lazy_command::<Value, _>(["ls", snapshot])
-            .try_filter_map(|value| async move { Ok(parse_file(value)) }))
+            .try_filter_map({
+                let mut accum = 0;
+                move |(value, bytes_read)| async move {
+                    accum += bytes_read;
+                    Ok(parse_file(value).map(|file| {
+                        let r = (file, accum);
+                        accum = 0;
+                        r
+                    }))
+                }
+            })
+        )
     }
 
     pub fn run_lazy_command<'a, T, A>(
         &'a self,
         args: impl IntoIterator<Item=A>,
-    ) -> Pin<Box<dyn Stream<Item=Result<T, Error>> + 'a>>
+    ) -> Pin<Box<dyn Stream<Item=Result<(T, usize), Error>> + 'a>>
     where
         T: DeserializeOwned,
         OsString: From<A>,
@@ -135,7 +146,12 @@ impl Restic {
 
             // This stream produces the entries
             let entries = FramedRead::new(handle.stdout, LinesCodec::new())
-                .map(|line| Ok(serde_json::from_str(line?.as_str())?));
+                .map(|line| {
+                    let line = line?;
+                    let value = serde_json::from_str(line.as_str())?;
+                    let bytes_read = line.as_bytes().len();
+                    Ok((value, bytes_read))
+                });
             // This stream checks if the status is ok and then produces
             // either nothing or an error.
             let wait = Rc::new(RefCell::new(handle.wait));

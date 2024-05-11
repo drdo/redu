@@ -1,5 +1,6 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use directories::ProjectDirs;
+use log::trace;
 use rusqlite::{Connection, params, Row, Transaction};
 use rusqlite::functions::FunctionFlags;
 use uuid::Uuid;
@@ -40,7 +41,7 @@ impl Cache {
             .into_owned();
         let filename = format!("{dir}/{name}.db");
         std::fs::create_dir_all(&dir).map_err(OpenError::CreateDirectory)?;
-        let conn = Connection::open(&filename)?;
+        let mut conn = Connection::open(&filename)?;
         conn.create_scalar_function(
             "path_parent",
             1,
@@ -55,6 +56,9 @@ impl Cache {
                 Ok(parent.map(|p| p.to_string()))
             }
         )?;
+        conn.profile(Some(|stmt, duration| {
+            trace!("SQL {stmt} (took {duration:#?})")
+        }));
         conn.execute_batch(include_str!("sql/init.sql"))?;
         Ok(Cache { filename: filename.into(), conn })
     }
