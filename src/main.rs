@@ -23,7 +23,6 @@ use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::layout::Size;
 use ratatui::widgets::WidgetRef;
 use scopeguard::ScopeGuard;
-use tokio::sync::Mutex;
 
 use ui::Action;
 use ui::Event;
@@ -249,7 +248,7 @@ async fn main() {
 /// Util ///////////////////////////////////////////////////////////////////////
 
 struct Speed {
-    count: Arc<Mutex<usize>>,
+    count: Arc<tokio::sync::Mutex<usize>>,
     _guard: ScopeGuard<(), Box<dyn FnOnce(())>>,
 }
 
