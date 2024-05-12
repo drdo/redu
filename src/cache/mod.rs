@@ -1,17 +1,13 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use directories::ProjectDirs;
 use log::trace;
-use rusqlite::{Connection, params, Row, Transaction};
+use rusqlite::{Connection, params, Row};
 use rusqlite::functions::FunctionFlags;
-use uuid::Uuid;
 
 use crate::cache::filetree::FileTree;
 use crate::types::{Directory, Entry, File};
 
 mod filetree;
-
-// TODO: Some queries are vulnerable to SQL injection
-// if the restic binary attacks us
 
 #[derive(Debug)]
 pub enum OpenError {
@@ -141,25 +137,12 @@ impl Cache {
         }
     }
 
-    pub fn start_snapshot(
-        &mut self,
-        id: &str
-        ) -> Result<SnapshotHandle, rusqlite::Error>
-    {
-        let table = Box::from(format!("finish-{}-{}", id, Uuid::new_v4()));
-        let tx = self.conn.transaction()?;
-        let stmt = format!("\
-            CREATE TEMP TABLE \"{}\" ( \
-                path TEXT NOT NULL PRIMARY KEY, \
-                size INTEGER NOT NULL \
-            )",
-                           table);
-        tx.execute(&stmt, [])?;
-        Ok(SnapshotHandle {
+    pub fn start_snapshot(&mut self, id: &str) -> SnapshotHandle {
+        SnapshotHandle {
             snapshot: Box::from(id),
-            table,
-            tx,
-        })
+            conn: &mut self.conn,
+            filetree: FileTree::new(),
+        }
     }
 
     pub fn delete_snapshot(&mut self, id: &str) -> Result<(), rusqlite::Error> {
@@ -199,55 +182,36 @@ impl Cache {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-pub struct SnapshotHandle<'cache> {
+pub struct SnapshotHandle<'c> {
     snapshot: Box<str>,
-    table: Box<str>,
-    tx: Transaction<'cache>,
+    conn: &'c mut Connection,
+    filetree: FileTree,
 }
 
-impl<'cache> SnapshotHandle<'cache> {
+impl<'c> SnapshotHandle<'c> {
     pub fn insert_file(
-        &self,
+        &mut self,
         path: &Utf8Path,
         size: usize
-    ) -> Result<(), rusqlite::Error>
-    {
-        let stmt = format!(
-            "INSERT INTO \"{}\" (path, size) VALUES (?, ?)",
-            &self.table);
-        self.tx
-            .execute(&stmt, params![path.as_str(), size])
-            .map(|_| ())
+    ) {
+        self.filetree.insert(path, size);
     }
 
     pub fn finish(self) -> Result<(), rusqlite::Error> {
-        let tree = { // Build tree
-            let mut tree = FileTree::new();
-            let mut stmt = self.tx.prepare(&format!(
-                "SELECT path, size FROM \"{}\"",
-                self.table))?;
-            let mut rows = stmt.query([])?;
-            while let Some(row) = rows.next()? {
-                let path = row.get_ref("path")?.as_str()?;
-                let size = row.get("size")?;
-                tree.insert(Utf8Path::new(path), size);
-            }
-            tree
-        };
-        self.tx.execute(&format!("DROP TABLE \"{}\"", &self.table), [])?;
-        self.tx.execute(
+        let tx = self.conn.transaction()?;
+        tx.execute(
             "INSERT INTO snapshots (id) VALUES (?)",
             [&self.snapshot])?;
         {
-            let mut file_stmt = self.tx.prepare("INSERT INTO files VALUES (?, ?, ?)")?;
-            let mut dir_stmt = self.tx.prepare("INSERT INTO directories VALUES (?, ?, ?)")?;
-            for entry in tree.iter() { match entry {
+            let mut file_stmt = tx.prepare("INSERT INTO files VALUES (?, ?, ?)")?;
+            let mut dir_stmt = tx.prepare("INSERT INTO directories VALUES (?, ?, ?)")?;
+            for entry in self.filetree.iter() { match entry {
                 Entry::File(File{ path, size}) =>
                     file_stmt.execute(params![&self.snapshot, path.into_string(), size])?,
                 Entry::Directory(Directory{ path, size}) =>
                     dir_stmt.execute(params![&self.snapshot, path.into_string(), size])?,
             };}
         }
-        self.tx.commit()
+        tx.commit()
     }
 }

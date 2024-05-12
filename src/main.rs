@@ -197,11 +197,11 @@ async fn update_snapshots(restic: &Restic, cache: &mut Cache) {
                 pb.set_message(format!("({msg:>12})"));
             })
         };
-        let handle = cache.start_snapshot(&snapshot).unwrap();
+        let mut handle = cache.start_snapshot(&snapshot);
         let mut files = restic.ls(&snapshot);
         while let Some((file, bytes_read)) = files.try_next().await.unwrap() {
             speed.inc(bytes_read).await;
-            handle.insert_file(&file.path, file.size).unwrap()
+            handle.insert_file(&file.path, file.size);
         }
         handle.finish().unwrap();
         pb.finish();
