@@ -74,61 +74,8 @@ async fn main() {
     };
     eprintln!("Using cache file '{}'", cache.filename());
 
-    // Figure out what snapshots we need to fetch
-    let missing_snapshots: Vec<Box<str>> = {
-        let pb = new_spinner("Fetching repository snapshot list");
-        let repo_snapshots = restic.snapshots().await
-            .unwrap()
-            .into_iter()
-            .map(|s| s.id)
-            .collect::<Vec<Box<str>>>();
-        pb.finish();
-        { // Delete snapshots from the DB that were deleted on the repo
-            let snapshots_to_delete = cache.get_snapshots()
-                .unwrap()
-                .into_iter()
-                .filter(|snapshot| ! repo_snapshots.contains(&snapshot))
-                .collect::<Vec<_>>();
-            for snapshot in snapshots_to_delete {
-                let pb = new_spinner(
-                    format!("Deleting snapshot {}", snapshot_short_id(&snapshot))
-                );
-                cache.delete_snapshot(&snapshot).unwrap();
-                pb.finish();
-            }
-        }
-
-        let db_snapshots = cache.get_snapshots().unwrap();
-        repo_snapshots.into_iter().filter(|s| ! db_snapshots.contains(s)).collect()
-    };
-
-    // Fetch missing snapshots
-    if missing_snapshots.is_empty() {
-        eprintln!("Snapshots up to date");
-    }
-    for (snapshot, i) in missing_snapshots.iter().zip(1..) {
-        let pb = new_spinner(format!(
-            "Fetching snapshot {}... [{}/{}]",
-            snapshot_short_id(snapshot), i, missing_snapshots.len()
-        ));
-        let speed = {
-            let pb = pb.clone();
-            Speed::new(move |v| {
-                let mut msg = humansize::format_size_i(v, humansize::BINARY);
-                msg.push_str("/s");
-                pb.set_message(format!("({msg:>12})"));
-            })
-        };
-        let handle = cache.start_snapshot(&snapshot).unwrap();
-        let mut files = restic.ls(&snapshot);
-        while let Some((file, bytes_read)) = files.try_next().await.unwrap() {
-            speed.inc(bytes_read).await;
-            handle.insert_file(&file.path, file.size).unwrap()
-        }
-        handle.finish().unwrap();
-        pb.finish();
-    }
-
+    update_snapshots(&restic, &mut cache).await;
+ 
     // UI
     stderr().execute(EnterAlternateScreen).unwrap();
     panic::update_hook(|prev, info| {
@@ -201,6 +148,63 @@ async fn main() {
 
     for line in output_lines {
         println!("{line}");
+    }
+}
+
+async fn update_snapshots(restic: &Restic, cache: &mut Cache) {
+    // Figure out what snapshots we need to fetch
+    let missing_snapshots: Vec<Box<str>> = {
+        let pb = new_spinner("Fetching repository snapshot list");
+        let repo_snapshots = restic.snapshots().await
+            .unwrap()
+            .into_iter()
+            .map(|s| s.id)
+            .collect::<Vec<Box<str>>>();
+        pb.finish();
+        { // Delete snapshots from the DB that were deleted on the repo
+            let snapshots_to_delete = cache.get_snapshots()
+                .unwrap()
+                .into_iter()
+                .filter(|snapshot| ! repo_snapshots.contains(&snapshot))
+                .collect::<Vec<_>>();
+            for snapshot in snapshots_to_delete {
+                let pb = new_spinner(
+                    format!("Deleting snapshot {}", snapshot_short_id(&snapshot))
+                );
+                cache.delete_snapshot(&snapshot).unwrap();
+                pb.finish();
+            }
+        }
+
+        let db_snapshots = cache.get_snapshots().unwrap();
+        repo_snapshots.into_iter().filter(|s| ! db_snapshots.contains(s)).collect()
+    };
+
+    // Fetch missing snapshots
+    if missing_snapshots.is_empty() {
+        eprintln!("Snapshots up to date");
+    }
+    for (snapshot, i) in missing_snapshots.iter().zip(1..) {
+        let pb = new_spinner(format!(
+            "Fetching snapshot {}... [{}/{}]",
+            snapshot_short_id(snapshot), i, missing_snapshots.len()
+        ));
+        let speed = {
+            let pb = pb.clone();
+            Speed::new(move |v| {
+                let mut msg = humansize::format_size_i(v, humansize::BINARY);
+                msg.push_str("/s");
+                pb.set_message(format!("({msg:>12})"));
+            })
+        };
+        let handle = cache.start_snapshot(&snapshot).unwrap();
+        let mut files = restic.ls(&snapshot);
+        while let Some((file, bytes_read)) = files.try_next().await.unwrap() {
+            speed.inc(bytes_read).await;
+            handle.insert_file(&file.path, file.size).unwrap()
+        }
+        handle.finish().unwrap();
+        pb.finish();
     }
 }
 
