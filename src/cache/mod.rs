@@ -7,7 +7,7 @@ use rusqlite::functions::FunctionFlags;
 use crate::cache::filetree::FileTree;
 use crate::types::{Directory, Entry, File};
 
-mod filetree;
+pub mod filetree;
 
 #[derive(Debug)]
 pub enum OpenError {
@@ -137,12 +137,31 @@ impl Cache {
         }
     }
 
-    pub fn start_snapshot(&mut self, id: &str) -> SnapshotHandle {
-        SnapshotHandle {
-            snapshot: Box::from(id),
-            conn: &mut self.conn,
-            filetree: FileTree::new(),
+    pub fn save_snapshot(
+        &mut self,
+        snapshot: &str,
+        filetree: &FileTree
+    ) -> Result<(), rusqlite::Error>
+    {
+        let tx = self.conn.transaction()?;
+        tx.execute(
+            "INSERT INTO snapshots (id) VALUES (?)",
+            [&snapshot])?;
+        {
+            let mut file_stmt = tx.prepare("INSERT INTO files VALUES (?, ?, ?)")?;
+            let mut dir_stmt = tx.prepare("INSERT INTO directories VALUES (?, ?, ?)")?;
+            for entry in filetree.iter() {
+                match entry {
+                    Entry::File(File{ path, size}) =>
+                        file_stmt.execute(
+                            params![&snapshot, path.into_string(), size])?,
+                    Entry::Directory(Directory{ path, size}) =>
+                        dir_stmt.execute(
+                            params![&snapshot, path.into_string(), size])?,
+                };
+            }
         }
+        tx.commit()
     }
 
     pub fn delete_snapshot(&mut self, id: &str) -> Result<(), rusqlite::Error> {
@@ -178,40 +197,5 @@ impl Cache {
 
     pub fn delete_all_marks(&mut self) -> Result<usize, rusqlite::Error> {
         self.conn.execute("DELETE FROM marks", [])
-    }
-}
-
-////////////////////////////////////////////////////////////////////////////////
-pub struct SnapshotHandle<'c> {
-    snapshot: Box<str>,
-    conn: &'c mut Connection,
-    filetree: FileTree,
-}
-
-impl<'c> SnapshotHandle<'c> {
-    pub fn insert_file(
-        &mut self,
-        path: &Utf8Path,
-        size: usize
-    ) {
-        self.filetree.insert(path, size);
-    }
-
-    pub fn finish(self) -> Result<(), rusqlite::Error> {
-        let tx = self.conn.transaction()?;
-        tx.execute(
-            "INSERT INTO snapshots (id) VALUES (?)",
-            [&self.snapshot])?;
-        {
-            let mut file_stmt = tx.prepare("INSERT INTO files VALUES (?, ?, ?)")?;
-            let mut dir_stmt = tx.prepare("INSERT INTO directories VALUES (?, ?, ?)")?;
-            for entry in self.filetree.iter() { match entry {
-                Entry::File(File{ path, size}) =>
-                    file_stmt.execute(params![&self.snapshot, path.into_string(), size])?,
-                Entry::Directory(Directory{ path, size}) =>
-                    dir_stmt.execute(params![&self.snapshot, path.into_string(), size])?,
-            };}
-        }
-        tx.commit()
     }
 }

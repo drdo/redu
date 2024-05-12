@@ -28,6 +28,7 @@ use ui::Action;
 use ui::Event;
 
 use crate::cache::Cache;
+use crate::cache::filetree::FileTree;
 use crate::restic::Restic;
 use crate::ui::App;
 
@@ -197,14 +198,14 @@ async fn update_snapshots(restic: &Restic, cache: &mut Cache) {
                 pb.set_message(format!("({msg:>12})"));
             })
         };
-        let mut handle = cache.start_snapshot(&snapshot);
+        let mut filetree = FileTree::new();
         let mut files = restic.ls(&snapshot);
         while let Some((file, bytes_read)) = files.try_next().await.unwrap() {
             speed.inc(bytes_read).await;
-            handle.insert_file(&file.path, file.size);
+            filetree.insert(&file.path, file.size);
         }
-        handle.finish().unwrap();
-        pb.finish();
+        cache.save_snapshot(snapshot, &filetree).unwrap();
+        pb.finish_with_message("Done");
     }
 }
 
