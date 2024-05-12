@@ -45,51 +45,6 @@ struct Cli {
     password_command: Option<String>,
 }
 
-fn render<'a>(
-    terminal: &'a mut Terminal<impl Backend>,
-    app: &App,
-) -> std::io::Result<CompletedFrame<'a>> {
-    terminal.draw(|frame| {
-        let area = frame.size();
-        let buf = frame.buffer_mut();
-        app.render_ref(area, buf)
-    })
-}
-
-fn convert_event(event: crossterm::event::Event) -> Option<Event> {
-    use crossterm::event::Event as TermEvent;
-    use crossterm::event::KeyEventKind::{Press, Release};
-    use ui::Event::*;
-    match event {
-        TermEvent::Resize(w, h) =>
-            Some(Resize(Size::new(w, h))),
-        TermEvent::Key(event) if [Press, Release].contains(&event.kind) => {
-            match event.code {
-                KeyCode::Left => Some(Left),
-                KeyCode::Char('h') => Some(Left),
-
-                KeyCode::Right => Some(Right),
-                KeyCode::Char(';') => Some(Right),
-
-                KeyCode::Up => Some(Up),
-                KeyCode::Char('k') => Some(Up),
-
-                KeyCode::Down => Some(Down),
-                KeyCode::Char('j') => Some(Down),
-
-                KeyCode::Char('m') => Some(Mark),
-                KeyCode::Char('u') => Some(Unmark),
-                KeyCode::Char('c') => Some(UnmarkAll),
-                KeyCode::Char('q') => Some(Quit),
-                KeyCode::Char('g') => Some(Generate),
-
-                _ => None,
-            }
-        }
-        _ => None,
-    }
-}
-
 #[tokio::main]
 async fn main() {
     let _logger = Logger::try_with_str("trace")
@@ -142,11 +97,11 @@ async fn main() {
                 pb.finish();
             }
         }
- 
+
         let db_snapshots = cache.get_snapshots().unwrap();
         repo_snapshots.into_iter().filter(|s| ! db_snapshots.contains(s)).collect()
     };
-    
+
     // Fetch missing snapshots
     if missing_snapshots.is_empty() {
         eprintln!("Snapshots up to date");
@@ -187,7 +142,7 @@ async fn main() {
     });
     let mut terminal = Terminal::new(CrosstermBackend::new(stderr())).unwrap();
     terminal.clear().unwrap();
-    
+
     let mut app = {
         let rect = terminal.size().unwrap();
         App::new(
@@ -240,13 +195,58 @@ async fn main() {
             }
         }
     }
-    
+
     disable_raw_mode().unwrap();
     stderr().execute(LeaveAlternateScreen).unwrap();
 
     for line in output_lines {
         println!("{line}");
     }
+}
+
+fn convert_event(event: crossterm::event::Event) -> Option<Event> {
+    use crossterm::event::Event as TermEvent;
+    use crossterm::event::KeyEventKind::{Press, Release};
+    use ui::Event::*;
+    match event {
+        TermEvent::Resize(w, h) =>
+            Some(Resize(Size::new(w, h))),
+        TermEvent::Key(event) if [Press, Release].contains(&event.kind) => {
+            match event.code {
+                KeyCode::Left => Some(Left),
+                KeyCode::Char('h') => Some(Left),
+
+                KeyCode::Right => Some(Right),
+                KeyCode::Char(';') => Some(Right),
+
+                KeyCode::Up => Some(Up),
+                KeyCode::Char('k') => Some(Up),
+
+                KeyCode::Down => Some(Down),
+                KeyCode::Char('j') => Some(Down),
+
+                KeyCode::Char('m') => Some(Mark),
+                KeyCode::Char('u') => Some(Unmark),
+                KeyCode::Char('c') => Some(UnmarkAll),
+                KeyCode::Char('q') => Some(Quit),
+                KeyCode::Char('g') => Some(Generate),
+
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn render<'a>(
+    terminal: &'a mut Terminal<impl Backend>,
+    app: &App,
+) -> std::io::Result<CompletedFrame<'a>> {
+    terminal.draw(|frame| {
+        let area = frame.size();
+        let buf = frame.buffer_mut();
+        app.render_ref(area, buf)
+    })
 }
 
 /// Util ///////////////////////////////////////////////////////////////////////
