@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS files (
 );
 
 CREATE INDEX IF NOT EXISTS files_path_parent
-ON files (path_parent(path));
+ON files (parent);
 
 -- directories
 CREATE TABLE IF NOT EXISTS directories (
@@ -18,6 +18,9 @@ CREATE TABLE IF NOT EXISTS directories (
     parent TEXT GENERATED ALWAYS AS (path_parent(path)),
     PRIMARY KEY (snapshot, path)
 );
+
+CREATE INDEX IF NOT EXISTS directories_path_parent
+ON directories (parent);
 
 -- snapshots
 CREATE TABLE IF NOT EXISTS snapshots (
