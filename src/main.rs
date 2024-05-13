@@ -254,40 +254,43 @@ fn render<'a>(
 
 /// Util ///////////////////////////////////////////////////////////////////////
 
-struct Speed {
-    count: Arc<AtomicUsize>,
-    should_quit: Arc<AtomicBool>,
+struct Speed(Arc<SpeedState>);
+
+struct SpeedState {
+    count: AtomicUsize,
+    should_quit: AtomicBool,
 }
 
 impl Speed {
     pub fn new(mut cb: impl FnMut(f64) + Send + 'static) -> Self {
-        let count = Arc::new(AtomicUsize::new(0));
-        let should_quit = Arc::new(AtomicBool::new(false));
-        let speed = Speed {
-            count: Arc::clone(&count),
-            should_quit: Arc::clone(&should_quit),
-        };
-        thread::spawn(move ||
-            loop {
-                thread::sleep(Duration::from_millis(500));
-                if should_quit.load(Ordering::Relaxed) {
-                    break;
+        let state = Arc::new(SpeedState {
+            count: AtomicUsize::new(0),
+            should_quit: AtomicBool::new(false),
+        });
+        thread::spawn({
+            let state = Arc::clone(&state);
+            move || {
+                loop {
+                    thread::sleep(Duration::from_millis(500));
+                    if state.should_quit.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    let old_count = state.count.swap(0, Ordering::Relaxed);
+                    cb(old_count as f64 / 0.5);
                 }
-                let old_count = count.swap(0, Ordering::Relaxed);
-                cb(old_count as f64 / 0.5);
             }
-        );
-        speed
+        });
+        Speed(state)
     }
 
     pub fn inc(&self, delta: usize) {
-        self.count.fetch_add(delta, Ordering::Relaxed);
+        self.0.count.fetch_add(delta, Ordering::Relaxed);
     }
 }
 
 impl Drop for Speed {
     fn drop(&mut self) {
-        self.should_quit.store(true, Ordering::Relaxed);
+        self.0.should_quit.store(true, Ordering::Relaxed);
     }
 }
 
