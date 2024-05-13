@@ -1,4 +1,3 @@
-#![feature(iter_intersperse)]
 #![feature(panic_update_hook)]
 #![feature(try_blocks)]
 #![feature(option_get_or_insert_default)]
