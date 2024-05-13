@@ -12,8 +12,6 @@ use serde_json::Value;
 
 use crate::types::{File, Snapshot};
 
-// TODO: Guard against panic unwind leaving processes around
-
 #[derive(Debug)]
 pub struct LaunchError(std::io::Error);
 
@@ -275,4 +273,3 @@ impl<T: DeserializeOwned> Iterator for Iter<T> {
         }
     }
 }
-
