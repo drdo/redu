@@ -293,7 +293,7 @@ impl Drop for Speed {
 
 pub fn new_spinner(prefix: impl Into<Cow<'static, str>>) -> ProgressBar {
     let pb = ProgressBar::new_spinner();
-    pb.set_style(ProgressStyle::with_template("{prefix} {msg} {spinner}").unwrap());
+    pb.set_style(ProgressStyle::with_template("{prefix} {elapsed} {msg} {spinner}").unwrap());
     pb.set_prefix(prefix);
     pb.enable_steady_tick(Duration::from_millis(100));
     pb
