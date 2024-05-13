@@ -7,10 +7,9 @@ edition = "2021"
 camino = "*"
 chrono = "*"
 clap = { version = "*", features = ["derive"] }
-crossterm = { version = "*", features = ["event-stream"] }
+crossterm = "*"
 directories = "5"
 flexi_logger = "*"
-futures = { version = "*" }
 humansize = "*"
 indicatif = "*"
 log = "*"
@@ -19,9 +18,6 @@ ratatui = { version = "*", features = ["unstable-widget-ref"] }
 rusqlite = { version = "*", features = ["bundled", "functions", "trace"] }
 serde = { version = "*", features = ["derive"] }
 serde_json = "*"
-scopeguard = "*"
-tokio = { version = "*", features = ["macros", "io-std", "io-util", "process", "rt-multi-thread", "rt", "time"] }
-tokio-util = { version = "*", features = ["codec"] }
 unicode-segmentation = "*"
 uuid = { version = "*", features = ["v4"] }
 

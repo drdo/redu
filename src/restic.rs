@@ -1,31 +1,58 @@
-use std::cell::RefCell;
-use std::ffi::{OsStr, OsString};
-use std::future::Future;
-use std::pin::Pin;
-use std::process::{ExitStatus, Stdio};
-use std::rc::Rc;
+use std::ffi::OsStr;
+use std::io::{BufRead, BufReader, Lines, Read};
+use std::marker::PhantomData;
+use std::os::unix::process::CommandExt;
+use std::process::{Child, ChildStdout, Command, ExitStatusError, Stdio};
+use std::str::Utf8Error;
 
 use camino::Utf8PathBuf;
-use futures::{Stream, stream, StreamExt, TryStreamExt};
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::Value;
-use tokio::io::AsyncReadExt;
-use tokio::process::{ChildStdout, Command};
-use tokio_util::codec::{FramedRead, LinesCodec, LinesCodecError};
 
 use crate::types::{File, Snapshot};
+
+// TODO: Guard against panic unwind leaving processes around
 
 #[derive(Debug)]
 pub struct LaunchError(std::io::Error);
 
 #[derive(Debug)]
+pub enum RunError {
+    Io(std::io::Error),
+    Utf8(Utf8Error),
+    Parse(serde_json::Error),
+    Exit(ExitStatusError),
+}
+
+impl From<std::io::Error> for RunError {
+    fn from(value: std::io::Error) -> Self {
+        RunError::Io(value)
+    }
+}
+
+impl From<Utf8Error> for RunError {
+    fn from(value: Utf8Error) -> Self {
+        RunError::Utf8(value)
+    }
+}
+
+impl From<serde_json::Error> for RunError {
+    fn from(value: serde_json::Error) -> Self {
+        RunError::Parse(value)
+    }
+}
+
+impl From<ExitStatusError> for RunError {
+    fn from(value: ExitStatusError) -> Self {
+        RunError::Exit(value)
+    }
+}
+
+#[derive(Debug)]
 pub enum ErrorKind {
     Launch(LaunchError),
-    Io(std::io::Error),
-    MaxLineLengthExceeded,
-    Parse(serde_json::Error),
-    Exit(ExitStatus),
+    Run(RunError),
 }
 
 impl From<LaunchError> for ErrorKind {
@@ -34,46 +61,54 @@ impl From<LaunchError> for ErrorKind {
     }
 }
 
-impl From<std::io::Error> for ErrorKind {
-    fn from(value: std::io::Error) -> Self {
-        ErrorKind::Io(value)
+impl From<RunError> for ErrorKind {
+    fn from(value: RunError) -> Self {
+        ErrorKind::Run(value)
     }
 }
 
-impl From<LinesCodecError> for ErrorKind {
-    fn from(value: LinesCodecError) -> Self {
-        match value {
-            LinesCodecError::MaxLineLengthExceeded => ErrorKind::MaxLineLengthExceeded,
-            LinesCodecError::Io(err) => ErrorKind::Io(err),
-        }
+impl From<std::io::Error> for ErrorKind {
+    fn from(value: std::io::Error) -> Self {
+        ErrorKind::Run(RunError::Io(value))
+    }
+}
+
+impl From<Utf8Error> for ErrorKind {
+    fn from(value: Utf8Error) -> Self {
+        ErrorKind::Run(RunError::Utf8(value))
     }
 }
 
 impl From<serde_json::Error> for ErrorKind {
     fn from(value: serde_json::Error) -> Self {
-        ErrorKind::Parse(value)
+        ErrorKind::Run(RunError::Parse(value))
+    }
+}
+
+impl From<ExitStatusError> for ErrorKind {
+    fn from(value: ExitStatusError) -> Self {
+        ErrorKind::Run(RunError::Exit(value))
     }
 }
 
 #[derive(Debug)]
 pub struct Error {
     kind: ErrorKind,
-    stderr: std::io::Result<Option<String>>,
+    stderr: Option<String>,
 }
 
 impl From<LaunchError> for Error {
     fn from(value: LaunchError) -> Self {
         Error {
-            kind: ErrorKind::Launch(value),
-            stderr: Ok(None),
+            kind: ErrorKind::Launch(value.into()),
+            stderr: None,
         }
     }
 }
 
-struct Handle {
-    stdout: ChildStdout,
-    stderr: Pin<Box<dyn Future<Output=Result<String, std::io::Error>>>>,
-    wait: Pin<Box<dyn Future<Output=Result<ExitStatus, std::io::Error>>>>,
+#[derive(Debug, Deserialize)]
+pub struct Config {
+    pub id: String,
 }
 
 pub struct Restic {
@@ -90,18 +125,18 @@ impl Restic {
         Restic { repo, password_command }
     }
 
-    pub async fn config(&self) -> Result<Config, Error> {
-        self.run_greedy_command(["cat", "config"]).await
+    pub fn config(&self) -> Result<Config, Error> {
+        self.run_greedy_command(["cat", "config"])
     }
 
-    pub async fn snapshots(&self) -> Result<Vec<Snapshot>, Error> {
-        self.run_greedy_command(["snapshots"]).await
+    pub fn snapshots(&self) -> Result<Vec<Snapshot>, Error> {
+        self.run_greedy_command(["snapshots"])
     }
 
-    pub fn ls<'a>(
-        &'a self,
+    pub fn ls(
+        &self,
         snapshot: &str,
-    ) -> Pin<Box<dyn Stream<Item=Result<(File, usize), Error>> + 'a>>
+    ) -> Result<impl Iterator<Item=Result<(File, usize), Error>> + 'static, LaunchError>
     {
         fn parse_file(mut v: Value) -> Option<File> {
             let mut m = std::mem::take(v.as_object_mut()?);
@@ -111,115 +146,59 @@ impl Restic {
             })
         }
 
-        Box::pin(self.run_lazy_command::<Value, _>(["ls", snapshot])
-            .try_filter_map({
-                let mut accum = 0;
-                move |(value, bytes_read)| async move {
-                    accum += bytes_read;
-                    Ok(parse_file(value).map(|file| {
-                        let r = (file, accum);
-                        accum = 0;
-                        r
-                    }))
-                }
-            })
-        )
+        Ok(self.run_lazy_command(["ls", snapshot])?
+            .filter_map(|r| r
+                .map(|(value, bytes_read)|
+                     parse_file(value).map(|file| (file, bytes_read))
+                )
+                .transpose()))
     }
 
-    pub fn run_lazy_command<'a, T, A>(
-        &'a self,
+    // This is a trait object because of
+    // https://github.com/rust-lang/rust/issues/125075
+    pub fn run_lazy_command<T, A>(
+        &self,
         args: impl IntoIterator<Item=A>,
-    ) -> Pin<Box<dyn Stream<Item=Result<(T, usize), Error>> + 'a>>
+    ) -> Result<Box<dyn Iterator<Item=Result<(T, usize), Error>> + 'static>, LaunchError>
     where
-        T: DeserializeOwned,
-        OsString: From<A>,
+        T: DeserializeOwned + 'static,
+        A: AsRef<OsStr>
     {
-        // We are creating a Stream that produces another Stream and flattening it
-        // The point is to run the restic process as part of awaiting
-        // on the first element of the stream
-        let args = args
-            .into_iter()
-            .map(OsString::from)
-            .collect::<Vec<OsString>>();
-        let wrapped_stream = stream::once(async move {
-            let handle = self.run_command(args).await?;
-
-            // This stream produces the entries
-            let entries = FramedRead::new(handle.stdout, LinesCodec::new())
-                .map(|line| {
-                    let line = line?;
-                    let value = serde_json::from_str(line.as_str())?;
-                    let bytes_read = line.as_bytes().len();
-                    Ok((value, bytes_read))
-                });
-            // This stream checks if the status is ok and then produces
-            // either nothing or an error.
-            let wait = Rc::new(RefCell::new(handle.wait));
-            let final_status = stream::try_unfold((), move |()| {
-                let wait = Rc::clone(&wait);
-                async move {
-                    let status = (&mut *wait.borrow_mut()).await?;
-                    if status.success() {
-                        Ok(None)
-                    } else {
-                        Err(ErrorKind::Exit(status))
-                    }
-                }
-            });
-
-            let stderr = Rc::new(RefCell::new(handle.stderr));
-            Ok::<_, Error>(entries
-               .chain(final_status)
-               .or_else(move |kind| {
-                   let stderr = Rc::clone(&stderr);
-                   async move {
-                       Err(Error {
-                           kind,
-                           stderr: (&mut *stderr.borrow_mut()).await.map(Some)
-                       })
-                   }
-               })
-            )
-        });
-        Box::pin(wrapped_stream.try_flatten())
+        let child = self.run_command(args)?;
+        Ok(Box::new(Iter::new(child)))
     }
 
-    async fn run_greedy_command<'a, T, A>(
+    fn run_greedy_command<T, A>(
         &self,
         args: impl IntoIterator<Item=A>,
     ) -> Result<T, Error>
     where
         T: DeserializeOwned,
-        A: AsRef<OsStr> + 'static,
+        A: AsRef<OsStr>,
     {
-        let mut handle = self.run_command(args).await?;
+        let child = self.run_command(args)?;
+        let output = child.wait_with_output()
+            .map_err(|e| Error {
+                kind: ErrorKind::Run(RunError::Io(e)),
+                stderr: None
+            })?;
         let r_value = try {
-            let stdout = {
-                let mut buf = String::new();
-                handle.stdout.read_to_string(&mut buf).await?;
-                buf
-            };
-            let t = serde_json::from_str(&stdout)?;
-            let status = handle.wait.await?;
-            if status.success() {
-                t
-            } else {
-                Err(ErrorKind::Exit(status))?
-            }
+            output.status.exit_ok()?;
+            serde_json::from_str(std::str::from_utf8(&output.stdout)?)?
         };
         match r_value {
-            Err(e) => Err(Error {
-                kind: e,
-                stderr: handle.stderr.await.map(Some)
+            Err(kind) => Err(Error {
+                kind,
+                stderr: Some(String::from_utf8_lossy(&output.stderr).into_owned()),
             }),
             Ok(value) => Ok(value),
         }
     }
 
-    async fn run_command<'a, A: AsRef<OsStr> + 'static>(
+    fn run_command<A: AsRef<OsStr>>(
         &self,
         args: impl IntoIterator<Item=A>,
-    ) -> Result<Handle, Error>
+    ) -> Result<Child, LaunchError>
     {
         let mut cmd = Command::new("restic");
         // Need to detach process from terminal
@@ -230,28 +209,70 @@ impl Restic {
         }
         cmd.arg("--json");
         cmd.args(args);
-        let mut child = cmd
+        Ok(cmd
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(LaunchError)?;
-        Ok(Handle {
-            stdout: child.stdout.take().unwrap(),
-            stderr: {
-                let mut stderr = child.stderr.take().unwrap();
-                Box::pin(async move {
-                    let mut buf = String::new();
-                    stderr.read_to_string(&mut buf).await?;
-                    Ok::<String, std::io::Error>(buf)
-                })
-            },
-            wait: Box::pin(async move { child.wait().await }),
-        })
+            .map_err(LaunchError)?)
     }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct Config {
-    pub id: String,
+struct Iter<T> {
+    child: Child,
+    lines: Lines<BufReader<ChildStdout>>,
+    _phantom_data: PhantomData<T>,
 }
+
+impl<T> Iter<T> {
+    fn new(mut child: Child) -> Self {
+        let stdout = child.stdout.take().unwrap();
+        Iter {
+            child,
+            lines: BufReader::new(stdout).lines(),
+            _phantom_data: PhantomData::default(),
+        }
+    }
+
+    fn read_stderr<U>(&mut self, kind: ErrorKind) -> Result<U, Error>
+    {
+        let mut buf = String::new();
+        match self.child.stderr.take().unwrap().read_to_string(&mut buf) {
+            Err(e) => Err(Error {
+                kind: ErrorKind::Run(RunError::Io(e)),
+                stderr: None,
+            }),
+            Ok(_) => Err(Error {
+                kind,
+                stderr: Some(buf),
+            })
+        }
+    }
+}
+
+impl<T: DeserializeOwned> Iterator for Iter<T> {
+    type Item = Result<(T, usize), Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(line) = self.lines.next() {
+            let r_value = try {
+                let line = line?;
+                let value = serde_json::from_str(&line)?;
+                (value, line.len())
+            };
+            Some(match r_value {
+                Err(kind) => self.read_stderr(kind),
+                Ok(value) => Ok(value),
+            })
+        } else {
+            match self.child.wait() {
+                Err(e) => Some(self.read_stderr(ErrorKind::Run(RunError::Io(e)))),
+                Ok(status) => match status.exit_ok() {
+                    Err(e) => Some(self.read_stderr(e.into())),
+                    Ok(()) => None,
+                }
+            }
+        }
+    }
+}
+

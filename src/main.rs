@@ -1,11 +1,13 @@
+#![feature(exit_status_error)]
+#![feature(option_get_or_insert_default)]
 #![feature(panic_update_hook)]
 #![feature(try_blocks)]
-#![feature(option_get_or_insert_default)]
 
 use std::borrow::Cow;
 use std::io::stderr;
-use std::panic;
+use std::{panic, thread};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use camino::Utf8Path;
@@ -14,14 +16,12 @@ use crossterm::event::KeyCode;
 use crossterm::ExecutableCommand;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use flexi_logger::{FileSpec, Logger, WriteMode};
-use futures::TryStreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use log::error;
 use ratatui::{CompletedFrame, Terminal};
 use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::layout::Size;
 use ratatui::widgets::WidgetRef;
-use scopeguard::ScopeGuard;
 
 use ui::Action;
 use ui::Event;
@@ -32,9 +32,9 @@ use crate::restic::Restic;
 use crate::ui::App;
 
 mod cache;
-mod restic;
 mod types;
 pub mod ui;
+mod restic;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -45,8 +45,7 @@ struct Cli {
     password_command: Option<String>,
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     let _logger = Logger::try_with_str("trace")
         .unwrap()
         .log_to_file(FileSpec::default())
@@ -68,13 +67,13 @@ async fn main() {
 
     let mut cache = { // Get config to determine repo id and open cache
         let pb = new_spinner("Getting restic config");
-        let repo_id = restic.config().await.unwrap().id;
+        let repo_id = restic.config().unwrap().id;
         pb.finish();
         Cache::open(repo_id.as_str()).unwrap()
     };
     eprintln!("Using cache file '{}'", cache.filename());
 
-    update_snapshots(&restic, &mut cache).await;
+    update_snapshots(&restic, &mut cache);
  
     // UI
     stderr().execute(EnterAlternateScreen).unwrap();
@@ -103,9 +102,8 @@ async fn main() {
     let mut output_lines = vec![];
 
     render(&mut terminal, &app).unwrap();
-    let mut terminal_events = crossterm::event::EventStream::new();
-    'outer: while let Some(event) = terminal_events.try_next().await.unwrap() {
-        let mut o_event = convert_event(event);
+    'outer: loop {
+        let mut o_event = convert_event(crossterm::event::read().unwrap());
         while let Some(event) = o_event {
             o_event = match app.update(event) {
                 Action::Nothing =>
@@ -151,11 +149,11 @@ async fn main() {
     }
 }
 
-async fn update_snapshots(restic: &Restic, cache: &mut Cache) {
+fn update_snapshots(restic: &Restic, cache: &mut Cache) {
     // Figure out what snapshots we need to fetch
     let missing_snapshots: Vec<Box<str>> = {
         let pb = new_spinner("Fetching repository snapshot list");
-        let repo_snapshots = restic.snapshots().await
+        let repo_snapshots = restic.snapshots()
             .unwrap()
             .into_iter()
             .map(|s| s.id)
@@ -198,9 +196,10 @@ async fn update_snapshots(restic: &Restic, cache: &mut Cache) {
             })
         };
         let mut filetree = FileTree::new();
-        let mut files = restic.ls(&snapshot);
-        while let Some((file, bytes_read)) = files.try_next().await.unwrap() {
-            speed.inc(bytes_read).await;
+        let files = restic.ls(&snapshot).unwrap();
+        for r in files {
+            let (file, bytes_read) = r.unwrap();
+            speed.inc(bytes_read);
             filetree.insert(&file.path, file.size);
         }
         cache.save_snapshot(snapshot, &filetree).unwrap();
@@ -256,37 +255,39 @@ fn render<'a>(
 /// Util ///////////////////////////////////////////////////////////////////////
 
 struct Speed {
-    count: Arc<tokio::sync::Mutex<usize>>,
-    _guard: ScopeGuard<(), Box<dyn FnOnce(())>>,
+    count: Arc<AtomicUsize>,
+    should_quit: Arc<AtomicBool>,
 }
 
 impl Speed {
     pub fn new(mut cb: impl FnMut(f64) + Send + 'static) -> Self {
-        let count = Arc::new(tokio::sync::Mutex::new(0));
-        let handle = {
-            let count = count.clone();
-            tokio::spawn(async move {
-                loop {
-                    tokio::time::sleep(Duration::from_millis(500)).await;
-                    let count = {
-                        let count_ref = &mut *count.lock().await;
-                        let tmp = *count_ref;
-                        *count_ref = 0;
-                        tmp
-                    };
-                    cb(count as f64 / 0.5);
+        let count = Arc::new(AtomicUsize::new(0));
+        let should_quit = Arc::new(AtomicBool::new(false));
+        let speed = Speed {
+            count: Arc::clone(&count),
+            should_quit: Arc::clone(&should_quit),
+        };
+        thread::spawn(move ||
+            loop {
+                thread::sleep(Duration::from_millis(500));
+                if should_quit.load(Ordering::Relaxed) {
+                    break;
                 }
-            })
-        };
-        let _guard = {
-            let dropfn: Box<dyn FnOnce(())> = Box::new(move |()| handle.abort());
-            scopeguard::guard((), dropfn)
-        };
-        Speed { count, _guard }
+                let old_count = count.swap(0, Ordering::Relaxed);
+                cb(old_count as f64 / 0.5);
+            }
+        );
+        speed
     }
 
-    pub async fn inc(&self, delta: usize) {
-        *self.count.lock().await += delta;
+    pub fn inc(&self, delta: usize) {
+        self.count.fetch_add(delta, Ordering::Relaxed);
+    }
+}
+
+impl Drop for Speed {
+    fn drop(&mut self) {
+        self.should_quit.store(true, Ordering::Relaxed);
     }
 }
 
