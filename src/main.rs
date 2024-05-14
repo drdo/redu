@@ -42,6 +42,12 @@ struct Cli {
     repo: String,
     #[arg(long)]
     password_command: Option<String>,
+    #[arg(
+        short = 'j',
+        default_value = None,
+        long_help = "How many restic subprocesses to spawn concurrently.\nDefaults to the available number of CPUs",
+    )]
+    parallelism: Option<usize>,
 }
 
 fn main() {
@@ -72,7 +78,9 @@ fn main() {
     };
     eprintln!("Using cache file '{}'", cache.filename());
 
-    update_snapshots(&restic, &mut cache);
+    let parallelism = cli.parallelism.unwrap_or(
+        thread::available_parallelism().unwrap().get());
+    update_snapshots(&restic, &mut cache, parallelism);
  
     // UI
     stderr().execute(EnterAlternateScreen).unwrap();
@@ -148,7 +156,11 @@ fn main() {
     }
 }
 
-fn update_snapshots(restic: &Restic, cache: &mut Cache) {
+fn update_snapshots(
+    restic: &Restic,
+    cache: &mut Cache,
+    parallelism: usize,
+) {
     // Figure out what snapshots we need to fetch
     let missing_snapshots: Vec<Box<str>> = {
         let pb = new_spinner("Fetching repository snapshot list");
@@ -185,9 +197,9 @@ fn update_snapshots(restic: &Restic, cache: &mut Cache) {
     eprintln!("Fetching snaphots");
     let total_missing_snapshots = missing_snapshots.len();
     let (snapshot_sender, snapshot_receiver) =
-        crossbeam_channel::bounded::<Box<str>>(8);
+        crossbeam_channel::bounded::<Box<str>>(parallelism);
     let (filetree_sender, filetree_receiver) =
-        crossbeam_channel::bounded::<(Box<str>, FileTree)>(4);
+        crossbeam_channel::bounded::<(Box<str>, FileTree)>(2);
     let pb = ProgressBar::new(total_missing_snapshots as u64)
         .with_style(ProgressStyle::with_template(
             "{elapsed_precise} {wide_bar} [{pos}/{len}] {msg}"
@@ -210,7 +222,7 @@ fn update_snapshots(restic: &Restic, cache: &mut Cache) {
         });
  
         // Fetching threads
-        for _ in 0..8 {
+        for _ in 0..parallelism {
             let snapshot_receiver = snapshot_receiver.clone();
             let filetree_sender = filetree_sender.clone();
             let speed = &speed;
