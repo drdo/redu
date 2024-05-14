@@ -216,11 +216,13 @@ fn update_snapshots(
         // DB Thread
         scope.spawn({
             let pb = pb.clone();
+            let mut speed = speed.clone();
             move || {
                 while let Ok((snapshot, filetree)) = filetree_receiver.recv() {
                     cache.save_snapshot(&snapshot, &filetree).unwrap();
                     pb.inc(1);
                 }
+                speed.stop();
                 pb.finish_with_message("Done");
             }
         });
