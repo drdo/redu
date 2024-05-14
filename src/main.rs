@@ -1,11 +1,8 @@
-#![feature(exit_status_error)]
-#![feature(option_get_or_insert_default)]
 #![feature(panic_update_hook)]
-#![feature(try_blocks)]
 
+use std::{panic, thread};
 use std::borrow::Cow;
 use std::io::stderr;
-use std::{panic, thread};
 use std::sync::{Arc, mpsc, Mutex};
 use std::time::Duration;
 
@@ -22,18 +19,15 @@ use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::layout::Size;
 use ratatui::widgets::WidgetRef;
 
-use ui::Action;
-use ui::Event;
+use dorestic::cache::Cache;
+use dorestic::cache::filetree::FileTree;
+use dorestic::restic::Restic;
 
-use crate::cache::Cache;
-use crate::cache::filetree::FileTree;
-use crate::restic::Restic;
+use crate::ui::Action;
 use crate::ui::App;
+use crate::ui::Event;
 
-mod cache;
-mod types;
-pub mod ui;
-mod restic;
+mod ui;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]

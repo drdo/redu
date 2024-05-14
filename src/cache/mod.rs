@@ -199,3 +199,71 @@ impl Cache {
         self.conn.execute("DELETE FROM marks", [])
     }
 }
+
+#[cfg(any(test, feature = "bench"))]
+pub mod tests {
+    use camino::Utf8PathBuf;
+
+    use super::filetree::FileTree;
+
+    fn string_range(n: usize) -> impl Iterator<Item=String> {
+        (0..n).map(|i| i.to_string())
+    }
+
+    pub struct PathGenerator {
+        branching_factor: usize,
+        state: Vec<Box<dyn Iterator<Item=String>>>,
+    }
+
+    impl PathGenerator {
+        pub fn new(depth: usize, branching_factor: usize) -> Self {
+            let mut state = Vec::with_capacity(depth);
+            for _ in 0..depth {
+                let it: Box<dyn Iterator<Item=_>> =
+                    Box::new(string_range(branching_factor));
+                state.push(it);
+            }
+            PathGenerator { branching_factor, state }
+        }
+
+        /// Reset all items before and including this index
+        fn reset(&mut self, index: usize) {
+            for i in 0..=index {
+                self.state[i] = Box::new(string_range(self.branching_factor));
+            }
+        }
+    }
+
+    impl Iterator for PathGenerator {
+        type Item = Utf8PathBuf;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            let mut path: Utf8PathBuf = Utf8PathBuf::new();
+            let mut i = 0;
+            loop {
+                if i == self.state.len() {
+                    // This iteration is done, produce value.
+                    break Some(path);
+                } else if let Some(component) = self.state[i].next() {
+                    path.push(component);
+                    i += 1;
+                } else if i+1 == self.state.len() {
+                    // It's None in the last component. The iterator is finished.
+                    break None;
+                } else {
+                    // It's None in some intermediate component.
+                    self.reset(i);
+                }
+            }
+        }
+    }
+
+    pub fn generate_filetree(depth: usize, branching_factor: usize) -> FileTree {
+        let mut filetree = FileTree::new();
+        for path in PathGenerator::new(depth, branching_factor) {
+            filetree.insert(&path, 1);
+        }
+        filetree
+    }
+}
+

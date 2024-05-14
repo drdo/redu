@@ -12,7 +12,7 @@ use ratatui::text::Span;
 use ratatui::widgets::{List, ListItem, Paragraph, WidgetRef};
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::types::{Directory, Entry, File};
+use dorestic::types::{Directory, Entry, File};
 
 #[derive(Debug)]
 pub enum Event {

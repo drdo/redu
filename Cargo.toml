@@ -21,6 +21,24 @@ serde_json = "*"
 unicode-segmentation = "*"
 uuid = { version = "*", features = ["v4"] }
 
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "dorestic"
+path = "src/main.rs"
+
+[features]
+bench = []
+
 [profile.release]
 codegen-units = 1
 lto = "fat"
+
+[dev-dependencies]
+criterion = { version = "*", features = ["html_reports"] }
+tempfile = "*"
+
+[[bench]]
+name = "cache"
+harness = false
