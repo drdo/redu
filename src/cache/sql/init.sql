@@ -1,6 +1,5 @@
 pragma journal_mode = OFF;
 pragma synchronous = OFF;
-pragma journal_size_limit = 6144000;
 
 -- files
 CREATE TABLE IF NOT EXISTS files (
