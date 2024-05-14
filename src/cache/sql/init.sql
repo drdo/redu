@@ -1,5 +1,5 @@
 pragma journal_mode = OFF;
-pragma synchronous = normal;
+pragma synchronous = OFF;
 pragma journal_size_limit = 6144000;
 
 -- files

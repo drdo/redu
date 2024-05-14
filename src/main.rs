@@ -1,6 +1,6 @@
 #![feature(panic_update_hook)]
 
-use std::{panic, thread};
+use std::{fs, panic, thread};
 use std::borrow::Cow;
 use std::io::stderr;
 use std::sync::{Arc, mpsc, Mutex};
@@ -19,6 +19,7 @@ use ratatui::{CompletedFrame, Terminal};
 use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::layout::Size;
 use ratatui::widgets::WidgetRef;
+use dorestic::cache;
 
 use dorestic::cache::Cache;
 use dorestic::cache::filetree::FileTree;
@@ -79,13 +80,23 @@ fn main() {
             path
         };
 
-        std::fs::create_dir_all(dirs.cache_dir())
+        fs::create_dir_all(dirs.cache_dir())
             .expect(&format!("unable to create cache directory at {}",
                              dirs.cache_dir().to_string_lossy()));
-        Cache::open(&cache_file)
-            .expect("unable to open cache file")
+
+        eprintln!("Using cache file '{cache_file:#?}'");
+        match Cache::open(&cache_file) {
+            Err(e) if cache::is_corruption_error(&e) => {
+                eprintln!("### Cache file corruption detected! Deleting and recreating. ###");
+                // Try to delete and reopen
+                fs::remove_file(&cache_file)
+                    .expect("unable to remove corrupted cache file");
+                eprintln!("Corrupted cache file deleted");
+                Cache::open(&cache_file)
+            }
+            x => x,
+        }.expect("unable to open cache file")
     };
-    eprintln!("Using cache file '{}'", cache.filename().to_string_lossy());
 
     let parallelism = cli.parallelism.unwrap_or(
         thread::available_parallelism().unwrap().get());

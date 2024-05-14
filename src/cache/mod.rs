@@ -10,6 +10,18 @@ use crate::types::{Directory, Entry, File};
 
 pub mod filetree;
 
+pub fn is_corruption_error(error: &rusqlite::Error) -> bool {
+    const CORRUPTION_CODES: [rusqlite::ErrorCode; 2] = [
+        rusqlite::ErrorCode::DatabaseCorrupt,
+        rusqlite::ErrorCode::NotADatabase,
+    ];
+    match error {
+        rusqlite::Error::SqliteFailure(rusqlite::ffi::Error { code, .. }, _) =>
+            CORRUPTION_CODES.contains(code),
+        _ => false
+    }
+}
+
 #[derive(Debug)]
 pub struct Cache {
     filename: PathBuf,
