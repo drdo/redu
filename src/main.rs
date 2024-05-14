@@ -6,7 +6,7 @@
 use std::borrow::Cow;
 use std::io::stderr;
 use std::{panic, thread};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, mpsc, Mutex};
 use std::time::Duration;
 
 use camino::Utf8Path;
@@ -195,38 +195,44 @@ fn update_snapshots(
         n => n,
     };
     eprintln!("Fetching snaphots");
-    let (snapshot_sender, snapshot_receiver) =
-        crossbeam_channel::bounded::<Box<str>>(parallelism);
-    let (filetree_sender, filetree_receiver) =
-        crossbeam_channel::bounded::<(Box<str>, FileTree)>(2);
-    let pb = ProgressBar::new(total_missing_snapshots as u64)
-        .with_style(ProgressStyle::with_template(
-            "{elapsed_precise} {wide_bar} [{pos}/{len}] {msg}"
-        ).unwrap());
-    let speed = {
-        let pb = pb.clone();
-        Speed::new(move |v| {
-            let mut msg = humansize::format_size_i(v, humansize::BINARY);
-            msg.push_str("/s");
-            pb.set_message(format!("({msg:>12})"));
-        })
-    };
     thread::scope(|scope| {
+        let snapshot_queue = Queue::new(missing_snapshots);
+        let (filetree_sender, filetree_receiver) =
+            mpsc::sync_channel::<(Box<str>, FileTree)>(2);
+
+        let pb = ProgressBar::new(total_missing_snapshots as u64)
+            .with_style(ProgressStyle::with_template(
+                "{elapsed_precise} {wide_bar} [{pos}/{len}] {msg}"
+            ).unwrap());
+        let speed = {
+            let pb = pb.clone();
+            Speed::new(move |v| {
+                let mut msg = humansize::format_size_i(v, humansize::BINARY);
+                msg.push_str("/s");
+                pb.set_message(format!("({msg:>12})"));
+            })
+        };
+ 
         // DB Thread
-        scope.spawn(|| {
-            while let Ok((snapshot, filetree)) = filetree_receiver.recv() {
-                cache.save_snapshot(&snapshot, &filetree).unwrap();
-                pb.inc(1);
+        scope.spawn({
+            let pb = pb.clone();
+            move || {
+                while let Ok((snapshot, filetree)) = filetree_receiver.recv() {
+                    cache.save_snapshot(&snapshot, &filetree).unwrap();
+                    eprintln!("Running pb inc");
+                    pb.inc(1);
+                }
+                pb.finish_with_message("Done");
             }
         });
  
         // Fetching threads
         for _ in 0..parallelism {
-            let snapshot_receiver = snapshot_receiver.clone();
+            let snapshot_queue = snapshot_queue.clone();
             let filetree_sender = filetree_sender.clone();
-            let speed = &speed;
+            let speed = speed.clone();
             scope.spawn(move || {
-                while let Ok(snapshot) = snapshot_receiver.recv() {
+                while let Some(snapshot) = snapshot_queue.pop() {
                     let mut filetree = FileTree::new();
                     let files = restic.ls(&snapshot).unwrap();
                     for r in files {
@@ -238,12 +244,6 @@ fn update_snapshots(
                 }
             });
         }
- 
-        // Feed the fetching threads
-        for snapshot in missing_snapshots.into_iter() {
-            snapshot_sender.send(snapshot).unwrap();
-        }
-        pb.finish_with_message("Done");
     });
 }
 
@@ -294,6 +294,7 @@ fn render<'a>(
 
 /// Util ///////////////////////////////////////////////////////////////////////
 
+#[derive(Clone)]
 struct Speed {
     state: Arc<Mutex<SpeedState>>,
 }
@@ -352,4 +353,17 @@ pub fn new_spinner(prefix: impl Into<Cow<'static, str>>) -> ProgressBar {
 
 fn snapshot_short_id(id: &str) -> String {
     id.chars().take(7).collect::<String>()
+}
+
+#[derive(Clone)]
+struct Queue<T>(Arc<Mutex<Vec<T>>>);
+
+impl<T> Queue<T> {
+    fn new(data: Vec<T>) -> Self {
+        Queue(Arc::new(Mutex::new(data)))
+    }
+    
+    fn pop(&self) -> Option<T> {
+        self.0.lock().unwrap().pop()
+    }
 }
