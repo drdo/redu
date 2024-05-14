@@ -295,6 +295,9 @@ fn render<'a>(
 
 /// Util ///////////////////////////////////////////////////////////////////////
 
+/// Track the speed of something in units/sec
+/// Periodically calls a callback with the current speed
+/// Users are expected to call the `inc` method to add units
 #[derive(Clone)]
 struct Speed {
     state: Arc<Mutex<SpeedState>>,
