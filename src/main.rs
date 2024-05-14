@@ -6,8 +6,7 @@
 use std::borrow::Cow;
 use std::io::stderr;
 use std::{panic, thread};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use camino::Utf8Path;
@@ -254,43 +253,51 @@ fn render<'a>(
 
 /// Util ///////////////////////////////////////////////////////////////////////
 
-struct Speed(Arc<SpeedState>);
+struct Speed {
+    state: Arc<Mutex<SpeedState>>,
+}
 
 struct SpeedState {
-    count: AtomicUsize,
-    should_quit: AtomicBool,
+    should_quit: bool,
+    count: usize,
 }
 
 impl Speed {
     pub fn new(mut cb: impl FnMut(f64) + Send + 'static) -> Self {
-        let state = Arc::new(SpeedState {
-            count: AtomicUsize::new(0),
-            should_quit: AtomicBool::new(false),
-        });
+        let state = Arc::new(Mutex::new(SpeedState {
+            should_quit: false,
+            count: 0,
+        }));
         thread::spawn({
             let state = Arc::clone(&state);
             move || {
                 loop {
-                    thread::sleep(Duration::from_millis(500));
-                    if state.should_quit.load(Ordering::Relaxed) {
+                    thread::sleep(Duration::from_millis(300));
+                    let mut guard = state.lock().unwrap();
+                    if guard.should_quit {
                         break;
                     }
-                    let old_count = state.count.swap(0, Ordering::Relaxed);
+                    let old_count = guard.count;
+                    guard.count = 0;
                     cb(old_count as f64 / 0.5);
                 }
             }
         });
-        Speed(state)
+        Speed { state }
     }
 
     pub fn inc(&self, delta: usize) {
-        self.0.count.fetch_add(delta, Ordering::Relaxed);
+        self.state.lock().unwrap().count += delta;
+    }
+    
+    pub fn stop(&mut self) {
+        self.state.lock().unwrap().should_quit = true;
     }
 }
 
 impl Drop for Speed {
     fn drop(&mut self) {
-        self.0.should_quit.store(true, Ordering::Relaxed);
+        self.stop();
     }
 }
 
