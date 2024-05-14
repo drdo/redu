@@ -181,7 +181,7 @@ fn update_snapshots(restic: &Restic, cache: &mut Cache) {
     if missing_snapshots.is_empty() {
         eprintln!("Snapshots up to date");
     }
-    for (snapshot, i) in missing_snapshots.iter().zip(1..) {
+    for (i, snapshot) in missing_snapshots.iter().enumerate() {
         let pb = new_spinner(format!(
             "Fetching snapshot {}... [{}/{}]",
             snapshot_short_id(snapshot), i, missing_snapshots.len()
