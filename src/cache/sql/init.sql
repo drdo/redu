@@ -1,3 +1,7 @@
+pragma journal_mode = WAL;
+pragma synchronous = normal;
+pragma journal_size_limit = 6144000;
+
 -- files
 CREATE TABLE IF NOT EXISTS files (
     snapshot TEXT NOT NULL,
