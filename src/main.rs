@@ -219,7 +219,6 @@ fn update_snapshots(
             move || {
                 while let Ok((snapshot, filetree)) = filetree_receiver.recv() {
                     cache.save_snapshot(&snapshot, &filetree).unwrap();
-                    eprintln!("Running pb inc");
                     pb.inc(1);
                 }
                 pb.finish_with_message("Done");
