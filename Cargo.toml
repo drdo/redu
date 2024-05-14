@@ -8,6 +8,7 @@ camino = "*"
 chrono = "*"
 clap = { version = "*", features = ["derive"] }
 crossterm = "*"
+crossbeam-channel = "*"
 directories = "5"
 flexi_logger = "*"
 humansize = "*"

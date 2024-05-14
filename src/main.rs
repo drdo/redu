@@ -180,30 +180,60 @@ fn update_snapshots(restic: &Restic, cache: &mut Cache) {
     // Fetch missing snapshots
     if missing_snapshots.is_empty() {
         eprintln!("Snapshots up to date");
+        return;
     }
-    for (i, snapshot) in missing_snapshots.iter().enumerate() {
-        let pb = new_spinner(format!(
-            "Fetching snapshot {}... [{}/{}]",
-            snapshot_short_id(snapshot), i, missing_snapshots.len()
-        ));
-        let speed = {
-            let pb = pb.clone();
-            Speed::new(move |v| {
-                let mut msg = humansize::format_size_i(v, humansize::BINARY);
-                msg.push_str("/s");
-                pb.set_message(format!("({msg:>12})"));
-            })
-        };
-        let mut filetree = FileTree::new();
-        let files = restic.ls(&snapshot).unwrap();
-        for r in files {
-            let (file, bytes_read) = r.unwrap();
-            speed.inc(bytes_read);
-            filetree.insert(&file.path, file.size);
+    eprintln!("Fetching snaphots");
+    let total_missing_snapshots = missing_snapshots.len();
+    let (snapshot_sender, snapshot_receiver) =
+        crossbeam_channel::bounded::<Box<str>>(8);
+    let (filetree_sender, filetree_receiver) =
+        crossbeam_channel::bounded::<(Box<str>, FileTree)>(4);
+    let pb = ProgressBar::new(total_missing_snapshots as u64)
+        .with_style(ProgressStyle::with_template(
+            "{elapsed_precise} {wide_bar} [{pos}/{len}] {msg}"
+        ).unwrap());
+    let speed = {
+        let pb = pb.clone();
+        Speed::new(move |v| {
+            let mut msg = humansize::format_size_i(v, humansize::BINARY);
+            msg.push_str("/s");
+            pb.set_message(format!("({msg:>12})"));
+        })
+    };
+    thread::scope(|scope| {
+        // DB Thread
+        scope.spawn(|| {
+            while let Ok((snapshot, filetree)) = filetree_receiver.recv() {
+                cache.save_snapshot(&snapshot, &filetree).unwrap();
+                pb.inc(1);
+            }
+        });
+ 
+        // Fetching threads
+        for _ in 0..8 {
+            let snapshot_receiver = snapshot_receiver.clone();
+            let filetree_sender = filetree_sender.clone();
+            let speed = &speed;
+            scope.spawn(move || {
+                while let Ok(snapshot) = snapshot_receiver.recv() {
+                    let mut filetree = FileTree::new();
+                    let files = restic.ls(&snapshot).unwrap();
+                    for r in files {
+                        let (file, bytes_read) = r.unwrap();
+                        speed.inc(bytes_read);
+                        filetree.insert(&file.path, file.size);
+                    }
+                    filetree_sender.send((snapshot, filetree)).unwrap();
+                }
+            });
         }
-        cache.save_snapshot(snapshot, &filetree).unwrap();
+ 
+        // Feed the fetching threads
+        for snapshot in missing_snapshots.into_iter() {
+            snapshot_sender.send(snapshot).unwrap();
+        }
         pb.finish_with_message("Done");
-    }
+    });
 }
 
 fn convert_event(event: crossterm::event::Event) -> Option<Event> {
