@@ -190,12 +190,11 @@ fn update_snapshots(
     };
 
     // Fetch missing snapshots
-    if missing_snapshots.is_empty() {
-        eprintln!("Snapshots up to date");
-        return;
-    }
+    let total_missing_snapshots = match missing_snapshots.len() {
+        0 => { eprintln!("Snapshots up to date"); return; },
+        n => n,
+    };
     eprintln!("Fetching snaphots");
-    let total_missing_snapshots = missing_snapshots.len();
     let (snapshot_sender, snapshot_receiver) =
         crossbeam_channel::bounded::<Box<str>>(parallelism);
     let (filetree_sender, filetree_receiver) =
