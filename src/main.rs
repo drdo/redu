@@ -311,17 +311,20 @@ impl Speed {
             count: 0,
         }));
         thread::spawn({
-            let state = Arc::clone(&state);
+            let state = Arc::downgrade(&state);
             move || {
-                loop {
-                    thread::sleep(Duration::from_millis(300));
-                    let mut guard = state.lock().unwrap();
-                    if guard.should_quit {
-                        break;
-                    }
-                    let old_count = guard.count;
-                    guard.count = 0;
+                while let Some(state) = state.upgrade() {
+                    let old_count = {
+                        let mut guard = state.lock().unwrap();
+                        if guard.should_quit {
+                            break;
+                        }
+                        let old_count = guard.count;
+                        guard.count = 0;
+                        old_count
+                    };
                     cb(old_count as f64 / 0.5);
+                    thread::sleep(Duration::from_millis(300));
                 }
             }
         });
@@ -334,12 +337,6 @@ impl Speed {
     
     pub fn stop(&mut self) {
         self.state.lock().unwrap().should_quit = true;
-    }
-}
-
-impl Drop for Speed {
-    fn drop(&mut self) {
-        self.stop();
     }
 }
 
