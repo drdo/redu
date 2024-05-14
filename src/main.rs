@@ -11,6 +11,7 @@ use clap::{command, Parser};
 use crossterm::event::KeyCode;
 use crossterm::ExecutableCommand;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
+use directories::ProjectDirs;
 use flexi_logger::{FileSpec, Logger, WriteMode};
 use indicatif::{ProgressBar, ProgressStyle};
 use log::error;
@@ -68,9 +69,23 @@ fn main() {
         let pb = new_spinner("Getting restic config");
         let repo_id = restic.config().unwrap().id;
         pb.finish();
-        Cache::open(repo_id.as_str()).unwrap()
+
+        // Figure out where to store the cache
+        let dirs = ProjectDirs::from("eu", "drdo", "dorestic")
+            .expect("unable to determine cache directory");
+        let cache_file = {
+            let mut path = dirs.cache_dir().to_path_buf();
+            path.push(format!("{repo_id}.db"));
+            path
+        };
+
+        std::fs::create_dir_all(dirs.cache_dir())
+            .expect(&format!("unable to create cache directory at {}",
+                             dirs.cache_dir().to_string_lossy()));
+        Cache::open(&cache_file)
+            .expect("unable to open cache file")
     };
-    eprintln!("Using cache file '{}'", cache.filename());
+    eprintln!("Using cache file '{}'", cache.filename().to_string_lossy());
 
     let parallelism = cli.parallelism.unwrap_or(
         thread::available_parallelism().unwrap().get());
@@ -206,7 +221,7 @@ fn update_snapshots(
                 pb.set_message(format!("({msg:>12})"));
             })
         };
- 
+
         // DB Thread
         scope.spawn({
             let pb = pb.clone();
@@ -220,7 +235,7 @@ fn update_snapshots(
                 pb.finish_with_message("Done");
             }
         });
- 
+
         // Fetching threads
         for _ in 0..parallelism {
             let snapshot_queue = snapshot_queue.clone();
@@ -357,7 +372,7 @@ impl<T> Queue<T> {
     fn new(data: Vec<T>) -> Self {
         Queue(Arc::new(Mutex::new(data)))
     }
-    
+
     fn pop(&self) -> Option<T> {
         self.0.lock().unwrap().pop()
     }

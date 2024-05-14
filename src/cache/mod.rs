@@ -1,5 +1,6 @@
+use std::path::{Path, PathBuf};
+
 use camino::{Utf8Path, Utf8PathBuf};
-use directories::ProjectDirs;
 use log::trace;
 use rusqlite::{Connection, params, Row};
 use rusqlite::functions::FunctionFlags;
@@ -10,34 +11,14 @@ use crate::types::{Directory, Entry, File};
 pub mod filetree;
 
 #[derive(Debug)]
-pub enum OpenError {
-    DetermineDirectory(String),
-    CreateDirectory(std::io::Error),
-    Sql(rusqlite::Error),
-}
-
-impl From<rusqlite::Error> for OpenError {
-    fn from(value: rusqlite::Error) -> Self { OpenError::Sql(value) }
-}
-
-#[derive(Debug)]
 pub struct Cache {
-    filename: Box<str>,
+    filename: PathBuf,
     conn: Connection,
 }
 
 impl Cache {
-    pub fn open(name: &str) -> Result<Self, OpenError> {
-        let dir = ProjectDirs::from("eu", "drdo", "dorestic")
-            .ok_or_else(|| OpenError::DetermineDirectory(
-                "could not determine appropriate cache location".to_owned()
-            ))?
-            .cache_dir()
-            .to_string_lossy()
-            .into_owned();
-        let filename = format!("{dir}/{name}.db");
-        std::fs::create_dir_all(&dir).map_err(OpenError::CreateDirectory)?;
-        let mut conn = Connection::open(&filename)?;
+    pub fn open(file: &Path) -> Result<Self, rusqlite::Error> {
+        let mut conn = Connection::open(&file)?;
         conn.create_scalar_function(
             "path_parent",
             1,
@@ -56,10 +37,10 @@ impl Cache {
             trace!("SQL {stmt} (took {duration:#?})")
         }));
         conn.execute_batch(include_str!("sql/init.sql"))?;
-        Ok(Cache { filename: filename.into(), conn })
+        Ok(Cache { filename: file.into(), conn })
     }
 
-    pub fn filename(&self) -> &str {
+    pub fn filename(&self) -> &Path {
         &self.filename
     }
 
