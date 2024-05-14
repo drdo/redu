@@ -187,31 +187,16 @@ pub mod tests {
 
     use super::filetree::FileTree;
 
-    fn string_range(n: usize) -> impl Iterator<Item=String> {
-        (0..n).map(|i| i.to_string())
-    }
-
     pub struct PathGenerator {
         branching_factor: usize,
-        state: Vec<Box<dyn Iterator<Item=String>>>,
+        state: Vec<(usize, Utf8PathBuf, usize)>,
     }
 
     impl PathGenerator {
         pub fn new(depth: usize, branching_factor: usize) -> Self {
             let mut state = Vec::with_capacity(depth);
-            for _ in 0..depth {
-                let it: Box<dyn Iterator<Item=_>> =
-                    Box::new(string_range(branching_factor));
-                state.push(it);
-            }
+            state.push((depth, Utf8PathBuf::new(), 0));
             PathGenerator { branching_factor, state }
-        }
-
-        /// Reset all items before and including this index
-        fn reset(&mut self, index: usize) {
-            for i in 0..=index {
-                self.state[i] = Box::new(string_range(self.branching_factor));
-            }
         }
     }
 
@@ -219,21 +204,17 @@ pub mod tests {
         type Item = Utf8PathBuf;
 
         fn next(&mut self) -> Option<Self::Item> {
-            let mut path: Utf8PathBuf = Utf8PathBuf::new();
-            let mut i = 0;
             loop {
-                if i == self.state.len() {
-                    // This iteration is done, produce value.
-                    break Some(path);
-                } else if let Some(component) = self.state[i].next() {
-                    path.push(component);
-                    i += 1;
-                } else if i+1 == self.state.len() {
-                    // It's None in the last component. The iterator is finished.
-                    break None;
-                } else {
-                    // It's None in some intermediate component.
-                    self.reset(i);
+                let (depth, prefix, child) = self.state.pop()?;
+                if child < self.branching_factor {
+                    let mut new_prefix = prefix.clone();
+                    new_prefix.push(Utf8PathBuf::from(child.to_string()));
+                    self.state.push((depth, prefix, child+1));
+                    if depth == 1 {
+                        break(Some(new_prefix));
+                    } else {
+                        self.state.push((depth-1, new_prefix, 0));
+                    }
                 }
             }
         }
@@ -247,4 +228,3 @@ pub mod tests {
         filetree
     }
 }
-
