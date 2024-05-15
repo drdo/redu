@@ -227,7 +227,7 @@ fn update_snapshots(
         0 => { eprintln!("Snapshots up to date"); return; },
         n => n,
     };
-    eprintln!("Fetching snaphots");
+    eprintln!("Fetching snapshots");
     thread::scope(|scope| {
         let pb = ProgressBar::new(total_missing_snapshots as u64)
             .with_style(ProgressStyle::with_template(
