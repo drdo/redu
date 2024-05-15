@@ -51,6 +51,7 @@ fn main() {
         .unwrap()
         .log_to_file(FileSpec::default())
         .write_mode(WriteMode::BufferAndFlush)
+        .format(flexi_logger::with_thread)
         .start()
         .unwrap();
 
