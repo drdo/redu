@@ -1,5 +1,5 @@
-pragma journal_mode = OFF;
-pragma synchronous = OFF;
+PRAGMA journal_mode = WAL;
+PRAGMA synchronous = NORMAL;
 
 -- files
 CREATE TABLE IF NOT EXISTS files (
