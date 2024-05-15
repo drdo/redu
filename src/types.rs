@@ -6,19 +6,19 @@ pub struct Snapshot {
     pub id: Box<str>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct File {
     pub path: Utf8PathBuf,
     pub size: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Directory {
     pub path: Utf8PathBuf,
     pub size: usize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum Entry {
     Directory(Directory),
     File(File),

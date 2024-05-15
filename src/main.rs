@@ -259,7 +259,8 @@ fn update_snapshots(
                     for r in files {
                         let (file, bytes_read) = r.unwrap();
                         speed.inc(bytes_read);
-                        filetree.insert(&file.path, file.size);
+                        filetree.insert(&file.path, file.size)
+                            .expect("repeated entry in restic snapshot ls");
                     }
                     filetree_sender.send((snapshot, filetree)).unwrap();
                 }

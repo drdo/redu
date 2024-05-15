@@ -9,6 +9,9 @@ pub struct FileTree {
     children: HashMap<Box<str>, FileTree>,
 }
 
+#[derive(Debug, Eq, PartialEq)]
+pub struct EntryExistsError;
+
 impl FileTree {
     pub fn new() -> FileTree {
         FileTree {
@@ -17,13 +20,26 @@ impl FileTree {
         }
     }
 
-    pub fn insert(&mut self, path: &Utf8Path, size: usize) {
-        let mut current = self;
-        for c in path.iter() {
-            current.size += size;
-            current = current.children.entry(Box::from(c)).or_insert(FileTree::new());
+    pub fn insert(
+        &mut self,
+        path: &Utf8Path,
+        size: usize,
+    ) -> Result<(), EntryExistsError>
+    {
+        let (mut breadcrumbs, remaining) = {
+            let (breadcrumbs, remaining) = self.find(path);
+            (breadcrumbs, remaining.map(Ok).unwrap_or(Err(EntryExistsError))?)
+        };
+
+        for node in breadcrumbs.iter_mut() {
+            unsafe { (**node).size += size };
         }
-        current.size = size;
+        let mut current = unsafe { &mut **breadcrumbs.last().unwrap() };
+        for c in remaining.iter() {
+            current = current.children.entry(Box::from(c)).or_insert(FileTree::new());
+            current.size = size;
+        }
+        Ok(())
     }
 
     pub fn iter(&self) -> Iter {
@@ -34,6 +50,35 @@ impl FileTree {
                 children: self.children.iter(),
             }]
         }
+    }
+
+    /// Returns the breadcrumbs of the largest prefix of the path.
+    /// If the file is in the tree the last breadcrumb will be the file itself.
+    /// Does not modify self at all.
+    /// The cdr is the remaining path that did not match, if any.
+    fn find(
+        &mut self,
+        path: &Utf8Path,
+    ) -> (Vec<*mut FileTree>, Option<Utf8PathBuf>)
+    {
+        let mut breadcrumbs: Vec<*mut FileTree> = vec![self];
+        let mut prefix = Utf8PathBuf::new();
+        for c in path.iter() {
+            let current = unsafe { &mut **breadcrumbs.last().unwrap() };
+            match current.children.get_mut(c) {
+                Some(next) => {
+                    breadcrumbs.push(next);
+                    prefix.push(c);
+                }
+                None => break,
+            }
+        }
+        let remaining_path = {
+            let suffix = path.strip_prefix(prefix).unwrap();
+            if suffix.as_str().is_empty() { None }
+            else { Some(suffix.to_path_buf()) }
+        };
+        (breadcrumbs, remaining_path)
     }
 }
 
@@ -90,5 +135,52 @@ impl<'a> Iterator for Iter<'a> {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::cache::filetree::{EntryExistsError, FileTree};
+    use crate::types::{Directory, Entry, File};
+
+    fn sort_entries(entries: &mut Vec<Entry>) {
+        entries.sort_unstable_by(|e0, e1| e0.path().cmp(e1.path()));
+    }
+
+    fn example_tree() -> FileTree {
+        let mut filetree = FileTree::new();
+        assert_eq!(filetree.insert("a/0/x".into(), 1), Ok(()));
+        assert_eq!(filetree.insert("a/0/y".into(), 2), Ok(()));
+        assert_eq!(filetree.insert("a/1/x/0".into(), 7), Ok(()));
+        assert_eq!(filetree.insert("a/0/z/0".into(), 1), Ok(()));
+        assert_eq!(filetree.insert("a/1/x/1".into(), 2), Ok(()));
+        filetree
+    }
+
+    #[test]
+    fn insert_uniques() {
+        let filetree = example_tree();
+        let mut entries = filetree.iter().collect::<Vec<_>>();
+        sort_entries(&mut entries);
+        assert_eq!(entries, vec![
+            Entry::Directory(Directory { path: "a".into(), size: 13 }),
+            Entry::Directory(Directory { path: "a/0".into(), size: 4 }),
+            Entry::File(File { path: "a/0/x".into(), size: 1 }),
+            Entry::File(File { path: "a/0/y".into(), size: 2 }),
+            Entry::Directory(Directory { path: "a/0/z".into(), size: 1 }),
+            Entry::File(File { path: "a/0/z/0".into(), size: 1 }),
+            Entry::Directory(Directory { path: "a/1".into(), size: 9 }),
+            Entry::Directory(Directory { path: "a/1/x".into(), size: 9 }),
+            Entry::File(File { path: "a/1/x/0".into(), size: 7 }),
+            Entry::File(File { path: "a/1/x/1".into(), size: 2 }),
+        ]);
+    }
+ 
+    #[test]
+    fn insert_existing() {
+        let mut filetree = example_tree();
+        assert_eq!(filetree.insert("".into(), 1), Err(EntryExistsError));
+        assert_eq!(filetree.insert("a/0".into(), 1), Err(EntryExistsError));
+        assert_eq!(filetree.insert("a/0/z/0".into(), 1), Err(EntryExistsError));
     }
 }
