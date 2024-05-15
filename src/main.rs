@@ -19,8 +19,8 @@ use ratatui::{CompletedFrame, Terminal};
 use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::layout::Size;
 use ratatui::widgets::WidgetRef;
-use dorestic::cache;
 
+use dorestic::cache;
 use dorestic::cache::{Cache, SnapshotGroup};
 use dorestic::cache::filetree::FileTree;
 use dorestic::restic::Restic;
@@ -62,7 +62,7 @@ fn main() {
         Logger::with(LogSpecification::trace())
             .log_to_file(filespec)
             .write_mode(WriteMode::BufferAndFlush)
-            .format(flexi_logger::with_thread)
+            .format(flexi_logger::detailed_format)
             .start()
             .unwrap();
     };
