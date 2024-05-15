@@ -84,7 +84,7 @@ fn main() {
             .expect(&format!("unable to create cache directory at {}",
                              dirs.cache_dir().to_string_lossy()));
 
-        eprintln!("Using cache file '{cache_file:#?}'");
+        eprintln!("Using cache file {cache_file:#?}");
         match Cache::open(&cache_file) {
             Err(e) if cache::is_corruption_error(&e) => {
                 eprintln!("### Cache file corruption detected! Deleting and recreating. ###");
