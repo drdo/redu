@@ -1,9 +1,11 @@
+use std::cmp::max;
 use std::collections::{hash_map, HashMap};
 
 use camino::{Utf8Path, Utf8PathBuf};
 
 use crate::types::{Directory, Entry, File};
 
+#[derive(Debug, Eq, PartialEq)]
 pub struct FileTree {
     size: usize,
     children: HashMap<Box<str>, FileTree>,
@@ -42,6 +44,35 @@ impl FileTree {
         Ok(())
     }
 
+    pub fn merge(self, other: FileTree) -> Self {
+        fn sorted_children(filetree: FileTree) -> Vec<(Box<str>, FileTree)> {
+            let mut children = filetree.children.into_iter().collect::<Vec<_>>();
+            children.sort_unstable_by(|(name0, _), (name1, _)| name0.cmp(name1));
+            children
+        }
+
+        let size = max(self.size, other.size);
+        let mut self_children = sorted_children(self).into_iter();
+        let mut other_children = sorted_children(other).into_iter();
+        let mut children = HashMap::new();
+        loop {
+            match (self_children.next(), other_children.next()) {
+                (Some((name0, tree0)), Some((name1, tree1))) => {
+                    if name0 == name1 {
+                        children.insert(name0, tree0.merge(tree1));
+                    } else {
+                        children.insert(name0, tree0);
+                        children.insert(name1, tree1);
+                    }
+                }
+                (None, Some((name, tree))) => { children.insert(name, tree); }
+                (Some((name, tree)), None) => { children.insert(name, tree); }
+                (None, None) => { break; }
+            }
+        }
+        FileTree { size, children }
+    }
+ 
     pub fn iter(&self) -> Iter {
         Iter {
             stack: vec![Breadcrumb {
@@ -147,7 +178,7 @@ mod tests {
         entries.sort_unstable_by(|e0, e1| e0.path().cmp(e1.path()));
     }
 
-    fn example_tree() -> FileTree {
+    fn example_tree_0() -> FileTree {
         let mut filetree = FileTree::new();
         assert_eq!(filetree.insert("a/0/x".into(), 1), Ok(()));
         assert_eq!(filetree.insert("a/0/y".into(), 2), Ok(()));
@@ -157,10 +188,19 @@ mod tests {
         filetree
     }
 
+    fn example_tree_1() -> FileTree {
+        let mut filetree = FileTree::new();
+        assert_eq!(filetree.insert("a/0/x".into(), 3), Ok(()));
+        assert_eq!(filetree.insert("a/0/y".into(), 2), Ok(()));
+        assert_eq!(filetree.insert("a/2/x/0".into(), 7), Ok(()));
+        assert_eq!(filetree.insert("a/0/z/0".into(), 9), Ok(()));
+        assert_eq!(filetree.insert("a/1/x/1".into(), 1), Ok(()));
+        filetree
+    }
+ 
     #[test]
-    fn insert_uniques() {
-        let filetree = example_tree();
-        let mut entries = filetree.iter().collect::<Vec<_>>();
+    fn insert_uniques_0() {
+        let mut entries = example_tree_0().iter().collect::<Vec<_>>();
         sort_entries(&mut entries);
         assert_eq!(entries, vec![
             Entry::Directory(Directory { path: "a".into(), size: 13 }),
@@ -175,12 +215,66 @@ mod tests {
             Entry::File(File { path: "a/1/x/1".into(), size: 2 }),
         ]);
     }
+
+    #[test]
+    fn insert_uniques_1() {
+        let mut entries = example_tree_1().iter().collect::<Vec<_>>();
+        sort_entries(&mut entries);
+        assert_eq!(entries, vec![
+            Entry::Directory(Directory { path: "a".into(), size: 22 }),
+            Entry::Directory(Directory { path: "a/0".into(), size: 14 }),
+            Entry::File(File { path: "a/0/x".into(), size: 3 }),
+            Entry::File(File { path: "a/0/y".into(), size: 2 }),
+            Entry::Directory(Directory { path: "a/0/z".into(), size: 9 }),
+            Entry::File(File { path: "a/0/z/0".into(), size: 9 }),
+            Entry::Directory(Directory { path: "a/1".into(), size: 1 }),
+            Entry::Directory(Directory { path: "a/1/x".into(), size: 1 }),
+            Entry::File(File { path: "a/1/x/1".into(), size: 1 }),
+            Entry::Directory(Directory { path: "a/2".into(), size: 7 }),
+            Entry::Directory(Directory { path: "a/2/x".into(), size: 7 }),
+            Entry::File(File { path: "a/2/x/0".into(), size: 7 }),
+        ]);
+    }
  
     #[test]
     fn insert_existing() {
-        let mut filetree = example_tree();
+        let mut filetree = example_tree_0();
         assert_eq!(filetree.insert("".into(), 1), Err(EntryExistsError));
         assert_eq!(filetree.insert("a/0".into(), 1), Err(EntryExistsError));
         assert_eq!(filetree.insert("a/0/z/0".into(), 1), Err(EntryExistsError));
+    }
+    
+    #[test]
+    fn merge_test() {
+        let filetree = example_tree_0().merge(example_tree_1());
+        let mut entries = filetree.iter().collect::<Vec<_>>();
+        sort_entries(&mut entries);
+        assert_eq!(entries, vec![
+            Entry::Directory(Directory { path: "a".into(), size: 22 }),
+            Entry::Directory(Directory { path: "a/0".into(), size: 14 }),
+            Entry::File(File { path: "a/0/x".into(), size: 3 }),
+            Entry::File(File { path: "a/0/y".into(), size: 2 }),
+            Entry::Directory(Directory { path: "a/0/z".into(), size: 9 }),
+            Entry::File(File { path: "a/0/z/0".into(), size: 9 }),
+            Entry::Directory(Directory { path: "a/1".into(), size: 9 }),
+            Entry::Directory(Directory { path: "a/1/x".into(), size: 9 }),
+            Entry::File(File { path: "a/1/x/0".into(), size: 7 }),
+            Entry::File(File { path: "a/1/x/1".into(), size: 2 }),
+            Entry::Directory(Directory { path: "a/2".into(), size: 7 }),
+            Entry::Directory(Directory { path: "a/2/x".into(), size: 7 }),
+            Entry::File(File { path: "a/2/x/0".into(), size: 7 }),
+        ]);
+    }
+ 
+    #[test]
+    fn merge_reflexivity() {
+        assert_eq!(example_tree_0().merge(example_tree_0()), example_tree_0());
+        assert_eq!(example_tree_1().merge(example_tree_1()), example_tree_1());
+    }
+ 
+    #[test]
+    fn merge_commutativity() {
+        assert_eq!(example_tree_0().merge(example_tree_1()),
+                   example_tree_1().merge(example_tree_0()));
     }
 }
