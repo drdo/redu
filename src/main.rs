@@ -14,7 +14,7 @@ use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScree
 use directories::ProjectDirs;
 use flexi_logger::{FileSpec, Logger, LogSpecification, WriteMode};
 use indicatif::{ProgressBar, ProgressStyle};
-use log::error;
+use log::{error, trace};
 use ratatui::{CompletedFrame, Terminal};
 use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::layout::Size;
@@ -51,15 +51,18 @@ fn main() {
         .expect("unable to determine project directory");
  
     let _logger = {
+        let mut directory = dirs.data_local_dir().to_path_buf();
+        directory.push(Utf8Path::new("logs"));
+
+        eprintln!("Logging to {:#?}", directory);
+ 
         let filespec = {
-            let mut directory = dirs.data_local_dir().to_path_buf();
-            directory.push(Utf8Path::new("logs"));
             FileSpec::default()
                 .directory(directory)
                 .suppress_basename()
         };
-        eprintln!("Logging to {:#?}", filespec.as_pathbuf(None));
-        Logger::with(LogSpecification::trace())
+        
+        Logger::with(LogSpecification::debug())
             .log_to_file(filespec)
             .write_mode(WriteMode::BufferAndFlush)
             .format(flexi_logger::detailed_format)
@@ -254,13 +257,19 @@ fn update_snapshots(
                 while let Some(snapshot) = missing_queue.pop() {
                     let mut filetree = FileTree::new();
                     let files = restic.ls(&snapshot).unwrap();
+                    trace!("(fetching-thread) started fetching snapshot ({})",
+                        snapshot_short_id(&snapshot));
                     for r in files {
                         let (file, bytes_read) = r.unwrap();
                         speed.inc(bytes_read);
                         filetree.insert(&file.path, file.size)
                             .expect("repeated entry in restic snapshot ls");
                     }
-                    snapshot_sender.send((snapshot, filetree)).unwrap();
+                    trace!("(fetching-thread) got snapshot, sending ({})",
+                        snapshot_short_id(&snapshot));
+                    snapshot_sender.send((snapshot.clone(), filetree)).unwrap();
+                    trace!("(fetching-thread) snapshot sent ({})",
+                        snapshot_short_id(&snapshot));
                 }
             });
         }
@@ -272,16 +281,32 @@ fn update_snapshots(
             let mut speed = speed.clone();
             let mut group = SnapshotGroup::new();
             move || {
-                while let Ok((snapshot, filetree)) = snapshot_receiver.recv() {
-                    group.add_snapshot(snapshot, filetree);
-                    pb.inc(1);
-                    if group.count() == GROUP_SIZE {
-                        group_sender.send(group).unwrap();
-                        group = SnapshotGroup::new();
+                loop {
+                    trace!("(grouping-thread) waiting for snapshot");
+                    match snapshot_receiver.recv() {
+                        Ok((snapshot, filetree)) => {
+                            trace!("(grouping-thread) got snapshot");
+                            group.add_snapshot(snapshot.clone(), filetree);
+                            trace!("(grouping-thread) added snapshot {}",
+                                snapshot_short_id(&snapshot));
+                            pb.inc(1);
+                            if group.count() == GROUP_SIZE {
+                                trace!("(grouping-thread) group is full, sending");
+                                group_sender.send(group).unwrap();
+                                trace!("(grouping-thread) sent group");
+                                group = SnapshotGroup::new();
+                            }
+                        }
+                        Err(_) => {
+                            trace!("(grouping-thread) loop done");
+                            break
+                        }
                     }
                 }
                 if group.count() > 0 {
+                    trace!("(grouping-thread) sending leftover group");
                     group_sender.send(group).unwrap();
+                    trace!("(grouping-thread) sent leftover group");
                 }
                 speed.stop();
                 pb.finish_with_message("Done");
@@ -291,9 +316,20 @@ fn update_snapshots(
 
         // DB Thread
         scope.spawn(move || {
-            while let Ok(group) = group_receiver.recv() {
-                cache.save_snapshot_group(group)
-                    .expect("unable to save snapshot group");
+            loop {
+                trace!("(db-thread) waiting for group");
+                match group_receiver.recv() {
+                    Ok(group) => {
+                        trace!("(db-thread) got group, saving");
+                        cache.save_snapshot_group(group)
+                            .expect("unable to save snapshot group");
+                        trace!("(db-thread) group saved");
+                    }
+                    Err(_) => {
+                        trace!("(db-thread) loop done");
+                        break
+                    }
+                }
             }
         });
     });
