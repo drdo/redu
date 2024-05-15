@@ -47,12 +47,25 @@ struct Cli {
 }
 
 fn main() {
-    let _logger = Logger::with(LogSpecification::trace())
-        .log_to_file(FileSpec::default())
-        .write_mode(WriteMode::BufferAndFlush)
-        .format(flexi_logger::with_thread)
-        .start()
-        .unwrap();
+    let dirs = ProjectDirs::from("eu", "drdo", "dorestic")
+        .expect("unable to determine project directory");
+ 
+    let _logger = {
+        let filespec = {
+            let mut directory = dirs.data_local_dir().to_path_buf();
+            directory.push(Utf8Path::new("logs"));
+            FileSpec::default()
+                .directory(directory)
+                .suppress_basename()
+        };
+        eprintln!("Logging to {:#?}", filespec.as_pathbuf(None));
+        Logger::with(LogSpecification::trace())
+            .log_to_file(filespec)
+            .write_mode(WriteMode::BufferAndFlush)
+            .format(flexi_logger::with_thread)
+            .start()
+            .unwrap();
+    };
 
     unsafe {
         rusqlite::trace::config_log(Some(|code, msg| {
@@ -71,9 +84,6 @@ fn main() {
         let repo_id = restic.config().unwrap().id;
         pb.finish();
 
-        // Figure out where to store the cache
-        let dirs = ProjectDirs::from("eu", "drdo", "dorestic")
-            .expect("unable to determine cache directory");
         let cache_file = {
             let mut path = dirs.cache_dir().to_path_buf();
             path.push(format!("{repo_id}.db"));
