@@ -328,29 +328,35 @@ struct Speed {
 struct SpeedState {
     should_quit: bool,
     count: usize,
+    previous: f64,
 }
 
 impl Speed {
     pub fn new(mut cb: impl FnMut(f64) + Send + 'static) -> Self {
+        const WINDOW_MILLIS: u64 = 300;
+        const ALPHA: f64 = 0.3;
+
         let state = Arc::new(Mutex::new(SpeedState {
             should_quit: false,
             count: 0,
+            previous: 0.0,
         }));
         thread::spawn({
             let state = Arc::downgrade(&state);
             move || {
                 while let Some(state) = state.upgrade() {
-                    let old_count = {
-                        let mut guard = state.lock().unwrap();
-                        if guard.should_quit {
-                            break;
-                        }
-                        let old_count = guard.count;
-                        guard.count = 0;
-                        old_count
+                    let value = {
+                        let SpeedState { should_quit, count, previous } =
+                            &mut *state.lock().unwrap();
+                        if *should_quit { break; }
+                        let current = *count as f64 / (WINDOW_MILLIS as f64 / 1000.0);
+                        *count = 0;
+                        let value = (ALPHA * current) + ((1.0-ALPHA) * *previous);
+                        *previous = current;
+                        value
                     };
-                    cb(old_count as f64 / 0.5);
-                    thread::sleep(Duration::from_millis(300));
+                    cb(value);
+                    thread::sleep(Duration::from_millis(WINDOW_MILLIS));
                 }
             }
         });
