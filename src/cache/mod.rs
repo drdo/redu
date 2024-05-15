@@ -242,6 +242,10 @@ impl SnapshotGroup {
         self.snapshots.push(id);
         self.filetree.replace(self.filetree.take().merge(filetree));
     }
+    
+    pub fn count(&self) -> usize {
+        self.snapshots.len()
+    }
 }
 
 #[cfg(any(test, feature = "bench"))]

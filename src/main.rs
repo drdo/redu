@@ -226,10 +226,6 @@ fn update_snapshots(
     };
     eprintln!("Fetching snaphots");
     thread::scope(|scope| {
-        let snapshot_queue = Queue::new(missing_snapshots);
-        let (filetree_sender, filetree_receiver) =
-            mpsc::sync_channel::<(Box<str>, FileTree)>(2);
-
         let pb = ProgressBar::new(total_missing_snapshots as u64)
             .with_style(ProgressStyle::with_template(
                 "{elapsed_precise} {wide_bar} [{pos}/{len}] {msg}"
@@ -243,30 +239,19 @@ fn update_snapshots(
             })
         };
 
-        // DB Thread
-        scope.spawn({
-            let pb = pb.clone();
-            let mut speed = speed.clone();
-            move || {
-                while let Ok((snapshot, filetree)) = filetree_receiver.recv() {
-                    let mut group = SnapshotGroup::new();
-                    group.add_snapshot(snapshot, filetree);
-                    cache.save_snapshot_group(group)
-                        .expect("unable to save snapshot group");
-                    pb.inc(1);
-                }
-                speed.stop();
-                pb.finish_with_message("Done");
-            }
-        });
+        let missing_queue = Queue::new(missing_snapshots);
+        let (snapshot_sender, snapshot_receiver) =
+            mpsc::sync_channel::<(Box<str>, FileTree)>(2);
+        let (group_sender, group_receiver) =
+            mpsc::sync_channel::<SnapshotGroup>(1);
 
         // Fetching threads
         for _ in 0..parallelism {
-            let snapshot_queue = snapshot_queue.clone();
-            let filetree_sender = filetree_sender.clone();
+            let missing_queue = missing_queue.clone();
+            let snapshot_sender = snapshot_sender.clone();
             let speed = speed.clone();
             scope.spawn(move || {
-                while let Some(snapshot) = snapshot_queue.pop() {
+                while let Some(snapshot) = missing_queue.pop() {
                     let mut filetree = FileTree::new();
                     let files = restic.ls(&snapshot).unwrap();
                     for r in files {
@@ -275,10 +260,42 @@ fn update_snapshots(
                         filetree.insert(&file.path, file.size)
                             .expect("repeated entry in restic snapshot ls");
                     }
-                    filetree_sender.send((snapshot, filetree)).unwrap();
+                    snapshot_sender.send((snapshot, filetree)).unwrap();
                 }
             });
         }
+ 
+        // Grouping Thread
+        scope.spawn({
+            const GROUP_SIZE: usize = 8;
+            let pb = pb.clone();
+            let mut speed = speed.clone();
+            let mut group = SnapshotGroup::new();
+            move || {
+                while let Ok((snapshot, filetree)) = snapshot_receiver.recv() {
+                    group.add_snapshot(snapshot, filetree);
+                    pb.inc(1);
+                    if group.count() == GROUP_SIZE {
+                        group_sender.send(group).unwrap();
+                        group = SnapshotGroup::new();
+                    }
+                }
+                if group.count() > 0 {
+                    group_sender.send(group).unwrap();
+                }
+                speed.stop();
+                pb.finish_with_message("Done");
+            }
+        });
+
+
+        // DB Thread
+        scope.spawn(move || {
+            while let Ok(group) = group_receiver.recv() {
+                cache.save_snapshot_group(group)
+                    .expect("unable to save snapshot group");
+            }
+        });
     });
 }
 
