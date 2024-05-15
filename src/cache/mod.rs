@@ -235,7 +235,7 @@ pub mod tests {
     pub fn generate_filetree(depth: usize, branching_factor: usize) -> FileTree {
         let mut filetree = FileTree::new();
         for path in PathGenerator::new(depth, branching_factor) {
-            filetree.insert(&path, 1);
+            filetree.insert(&path, 1).unwrap();
         }
         filetree
     }
