@@ -19,6 +19,7 @@ rusqlite = { version = "*", features = ["bundled", "functions", "trace"] }
 serde = { version = "*", features = ["derive"] }
 serde_json = "*"
 unicode-segmentation = "*"
+fallible-iterator = "*"
 
 [lib]
 path = "src/lib.rs"

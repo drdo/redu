@@ -414,6 +414,7 @@ dependencies = [
  "criterion",
  "crossterm",
  "directories",
+ "fallible-iterator",
  "flexi_logger",
  "humansize",
  "indicatif",

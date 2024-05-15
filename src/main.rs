@@ -21,7 +21,7 @@ use ratatui::layout::Size;
 use ratatui::widgets::WidgetRef;
 use dorestic::cache;
 
-use dorestic::cache::Cache;
+use dorestic::cache::{Cache, SnapshotGroup};
 use dorestic::cache::filetree::FileTree;
 use dorestic::restic::Restic;
 
@@ -210,7 +210,7 @@ fn update_snapshots(
                 let pb = new_spinner(
                     format!("Deleting snapshot {}", snapshot_short_id(&snapshot))
                 );
-                cache.delete_snapshot(&snapshot).unwrap();
+                cache.delete_snapshots([snapshot]).unwrap();
                 pb.finish();
             }
         }
@@ -249,7 +249,10 @@ fn update_snapshots(
             let mut speed = speed.clone();
             move || {
                 while let Ok((snapshot, filetree)) = filetree_receiver.recv() {
-                    cache.save_snapshot(&snapshot, &filetree).unwrap();
+                    let mut group = SnapshotGroup::new();
+                    group.add_snapshot(snapshot, filetree);
+                    cache.save_snapshot_group(group)
+                        .expect("unable to save snapshot group");
                     pb.inc(1);
                 }
                 speed.stop();
