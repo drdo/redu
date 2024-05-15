@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use log::trace;
@@ -24,7 +24,6 @@ pub fn is_corruption_error(error: &rusqlite::Error) -> bool {
 
 #[derive(Debug)]
 pub struct Cache {
-    filename: PathBuf,
     conn: Connection,
 }
 
@@ -49,11 +48,7 @@ impl Cache {
             trace!("SQL {stmt} (took {duration:#?})")
         }));
         conn.execute_batch(include_str!("sql/init.sql"))?;
-        Ok(Cache { filename: file.into(), conn })
-    }
-
-    pub fn filename(&self) -> &Path {
-        &self.filename
+        Ok(Cache { conn })
     }
 
     pub fn get_snapshots(
