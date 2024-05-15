@@ -50,7 +50,7 @@ fn main() {
     let _logger = Logger::try_with_str("trace")
         .unwrap()
         .log_to_file(FileSpec::default())
-        .write_mode(WriteMode::Direct)
+        .write_mode(WriteMode::BufferAndFlush)
         .start()
         .unwrap();
 
