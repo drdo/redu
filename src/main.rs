@@ -12,7 +12,7 @@ use crossterm::event::KeyCode;
 use crossterm::ExecutableCommand;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use directories::ProjectDirs;
-use flexi_logger::{FileSpec, Logger, WriteMode};
+use flexi_logger::{FileSpec, Logger, LogSpecification, WriteMode};
 use indicatif::{ProgressBar, ProgressStyle};
 use log::error;
 use ratatui::{CompletedFrame, Terminal};
@@ -47,8 +47,7 @@ struct Cli {
 }
 
 fn main() {
-    let _logger = Logger::try_with_str("trace")
-        .unwrap()
+    let _logger = Logger::with(LogSpecification::trace())
         .log_to_file(FileSpec::default())
         .write_mode(WriteMode::BufferAndFlush)
         .format(flexi_logger::with_thread)
