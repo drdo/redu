@@ -4,7 +4,7 @@ use std::{fs, panic, thread};
 use std::borrow::Cow;
 use std::io::stderr;
 use std::sync::{Arc, mpsc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use camino::Utf8Path;
 use clap::{command, Parser};
@@ -14,7 +14,7 @@ use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScree
 use directories::ProjectDirs;
 use flexi_logger::{FileSpec, Logger, LogSpecification, WriteMode};
 use indicatif::{ProgressBar, ProgressStyle};
-use log::{error, trace};
+use log::{error, info, trace};
 use ratatui::{CompletedFrame, Terminal};
 use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::layout::Size;
@@ -259,15 +259,21 @@ fn update_snapshots(
                     let files = restic.ls(&snapshot).unwrap();
                     trace!("(fetching-thread) started fetching snapshot ({})",
                         snapshot_short_id(&snapshot));
+                    let start = Instant::now();
                     for r in files {
                         let (file, bytes_read) = r.unwrap();
                         speed.inc(bytes_read);
                         filetree.insert(&file.path, file.size)
                             .expect("repeated entry in restic snapshot ls");
                     }
+                    info!("(fetching-thread) snapshot fetched ({}) in {}s",
+                        snapshot_short_id(&snapshot), start.elapsed().as_secs_f64());
                     trace!("(fetching-thread) got snapshot, sending ({})",
                         snapshot_short_id(&snapshot));
+                    let start = Instant::now();
                     snapshot_sender.send((snapshot.clone(), filetree)).unwrap();
+                    info!("(fetching-thread) waited {}s to send snapshot ({})",
+                        start.elapsed().as_secs_f64(), snapshot_short_id(&snapshot));
                     trace!("(fetching-thread) snapshot sent ({})",
                         snapshot_short_id(&snapshot));
                 }
@@ -283,16 +289,23 @@ fn update_snapshots(
             move || {
                 loop {
                     trace!("(grouping-thread) waiting for snapshot");
+                    let start = Instant::now();
                     match snapshot_receiver.recv() {
                         Ok((snapshot, filetree)) => {
-                            trace!("(grouping-thread) got snapshot");
+                            info!("(grouping-thread) waited {}s to get snapshot ({})",
+                                start.elapsed().as_secs_f64(), snapshot_short_id(&snapshot));
+                            trace!("(grouping-thread) got snapshot ({})",
+                                snapshot_short_id(&snapshot));
                             group.add_snapshot(snapshot.clone(), filetree);
-                            trace!("(grouping-thread) added snapshot {}",
+                            trace!("(grouping-thread) added snapshot ({})",
                                 snapshot_short_id(&snapshot));
                             pb.inc(1);
                             if group.count() == GROUP_SIZE {
                                 trace!("(grouping-thread) group is full, sending");
+                                let start = Instant::now();
                                 group_sender.send(group).unwrap();
+                                info!("(grouping-thread) waited {}s to send group",
+                                    start.elapsed().as_secs_f64());
                                 trace!("(grouping-thread) sent group");
                                 group = SnapshotGroup::new();
                             }
@@ -305,7 +318,10 @@ fn update_snapshots(
                 }
                 if group.count() > 0 {
                     trace!("(grouping-thread) sending leftover group");
+                    let start = Instant::now();
                     group_sender.send(group).unwrap();
+                    info!("(grouping-thread) waited {}s to send leftover group",
+                        start.elapsed().as_secs_f64());
                     trace!("(grouping-thread) sent leftover group");
                 }
                 speed.stop();
@@ -318,11 +334,17 @@ fn update_snapshots(
         scope.spawn(move || {
             loop {
                 trace!("(db-thread) waiting for group");
+                let start = Instant::now();
                 match group_receiver.recv() {
                     Ok(group) => {
+                        info!("(db-thread) waited {}s to get group",
+                            start.elapsed().as_secs_f64());
                         trace!("(db-thread) got group, saving");
+                        let start = Instant::now();
                         cache.save_snapshot_group(group)
                             .expect("unable to save snapshot group");
+                        info!("(db-thread) waited {}s to save group",
+                            start.elapsed().as_secs_f64());
                         trace!("(db-thread) group saved");
                     }
                     Err(_) => {
