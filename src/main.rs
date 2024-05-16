@@ -128,7 +128,7 @@ fn main() -> anyhow::Result<()> {
         }.expect("unable to open cache file")
     };
 
-    update_snapshots(&restic, &mut cache, cli.fetching_thread_count, cli.group_size)?;
+    sync_snapshots(&restic, &mut cache, cli.fetching_thread_count, cli.group_size)?;
  
     // UI
     stderr().execute(EnterAlternateScreen)?;
@@ -205,7 +205,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn update_snapshots(
+fn sync_snapshots(
     restic: &Restic,
     cache: &mut Cache,
     fetching_thread_count: usize,
@@ -226,6 +226,7 @@ fn update_snapshots(
                 .into_iter()
                 .filter(|snapshot| ! repo_snapshots.contains(&snapshot))
                 .collect::<Vec<_>>();
+            eprintln!("Need to delete {} snapshots", snapshots_to_delete.len());
             for snapshot in snapshots_to_delete {
                 let short_id = snapshot_short_id(&snapshot);
                 let mut pb = new_pb_with_style(
