@@ -197,6 +197,16 @@ mod tests {
         assert_eq!(filetree.insert("a/1/x/1".into(), 1), Ok(()));
         filetree
     }
+
+    fn example_tree_2() -> FileTree {
+        let mut filetree = FileTree::new();
+        assert_eq!(filetree.insert("b/0/x".into(), 3), Ok(()));
+        assert_eq!(filetree.insert("b/0/y".into(), 2), Ok(()));
+        assert_eq!(filetree.insert("a/2/x/0".into(), 7), Ok(()));
+        assert_eq!(filetree.insert("b/0/z/0".into(), 9), Ok(()));
+        assert_eq!(filetree.insert("a/1/x/1".into(), 1), Ok(()));
+        filetree
+    }
  
     #[test]
     fn insert_uniques_0() {
@@ -270,6 +280,12 @@ mod tests {
     fn merge_reflexivity() {
         assert_eq!(example_tree_0().merge(example_tree_0()), example_tree_0());
         assert_eq!(example_tree_1().merge(example_tree_1()), example_tree_1());
+    }
+
+    #[test]
+    fn merge_associativity() {
+        assert_eq!(example_tree_0().merge(example_tree_1()).merge(example_tree_2()),
+                   example_tree_0().merge(example_tree_1().merge(example_tree_2())));
     }
  
     #[test]
