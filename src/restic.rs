@@ -1,4 +1,5 @@
 use std::ffi::OsStr;
+use std::fmt::{Display, Formatter};
 use std::io::{BufRead, BufReader, Lines, Read};
 use std::marker::PhantomData;
 use std::os::unix::process::CommandExt;
@@ -9,60 +10,32 @@ use camino::Utf8PathBuf;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::Value;
+use thiserror::Error;
 
 use crate::types::{File, Snapshot};
 
-#[derive(Debug)]
-pub struct LaunchError(std::io::Error);
+#[derive(Debug, Error)]
+#[error("error launching restic process")]
+pub struct LaunchError(#[source] std::io::Error);
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum RunError {
-    Io(std::io::Error),
-    Utf8(Utf8Error),
-    Parse(serde_json::Error),
-    Exit(ExitStatusError),
+    #[error("error doing IO")]
+    Io(#[from] std::io::Error),
+    #[error("error reading input as UTF-8")]
+    Utf8(#[from] Utf8Error),
+    #[error("error parsing JSON")]
+    Parse(#[from] serde_json::Error),
+    #[error("the restic process exited with an error code")]
+    Exit(#[from] ExitStatusError),
 }
 
-impl From<std::io::Error> for RunError {
-    fn from(value: std::io::Error) -> Self {
-        RunError::Io(value)
-    }
-}
-
-impl From<Utf8Error> for RunError {
-    fn from(value: Utf8Error) -> Self {
-        RunError::Utf8(value)
-    }
-}
-
-impl From<serde_json::Error> for RunError {
-    fn from(value: serde_json::Error) -> Self {
-        RunError::Parse(value)
-    }
-}
-
-impl From<ExitStatusError> for RunError {
-    fn from(value: ExitStatusError) -> Self {
-        RunError::Exit(value)
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum ErrorKind {
-    Launch(LaunchError),
-    Run(RunError),
-}
-
-impl From<LaunchError> for ErrorKind {
-    fn from(value: LaunchError) -> Self {
-        ErrorKind::Launch(value)
-    }
-}
-
-impl From<RunError> for ErrorKind {
-    fn from(value: RunError) -> Self {
-        ErrorKind::Run(value)
-    }
+    #[error("error launching restic process")]
+    Launch(#[from] LaunchError),
+    #[error("error while running restic process")]
+    Run(#[from] RunError),
 }
 
 impl From<std::io::Error> for ErrorKind {
@@ -89,10 +62,20 @@ impl From<ExitStatusError> for ErrorKind {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub struct Error {
+    #[source]
     kind: ErrorKind,
     stderr: Option<String>,
+}
+
+impl Display for Error {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match &self.stderr {
+            Some(s) => write!(f, "restic error, stderr dump:\n{}", s),
+            None => write!(f, "restic error"),
+        }
+    }
 }
 
 impl From<LaunchError> for Error {

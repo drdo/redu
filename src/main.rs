@@ -63,7 +63,7 @@ struct Cli {
     group_size: usize,
 }
 
-fn main() {
+fn main() -> anyhow::Result<()> {
     let dirs = ProjectDirs::from("eu", "drdo", "dorestic")
         .expect("unable to determine project directory");
  
@@ -83,14 +83,13 @@ fn main() {
             .log_to_file(filespec)
             .write_mode(WriteMode::BufferAndFlush)
             .format(flexi_logger::detailed_format)
-            .start()
-            .unwrap();
+            .start()?
     };
 
     unsafe {
         rusqlite::trace::config_log(Some(|code, msg| {
             error!(target: "sqlite", "({code}) {msg}");
-        })).unwrap();
+        }))?;
     }
 
     let cli = Cli::parse();
@@ -102,7 +101,7 @@ fn main() {
     let mut cache = { // Get config to determine repo id and open cache
         let mut pb = new_pb_with_style("Getting restic config {spinner}");
         pb_enable_tick(&mut pb);
-        let repo_id = restic.config().unwrap().id;
+        let repo_id = restic.config()?.id;
         pb.finish();
 
         let cache_file = {
@@ -129,43 +128,43 @@ fn main() {
         }.expect("unable to open cache file")
     };
 
-    update_snapshots(&restic, &mut cache, cli.fetching_thread_count, cli.group_size);
+    update_snapshots(&restic, &mut cache, cli.fetching_thread_count, cli.group_size)?;
  
     // UI
-    stderr().execute(EnterAlternateScreen).unwrap();
+    stderr().execute(EnterAlternateScreen)?;
     panic::update_hook(|prev, info| {
         stderr().execute(LeaveAlternateScreen).unwrap();
         prev(info);
     });
-    enable_raw_mode().unwrap();
+    enable_raw_mode()?;
     panic::update_hook(|prev, info| {
         disable_raw_mode().unwrap();
         prev(info);
     });
-    let mut terminal = Terminal::new(CrosstermBackend::new(stderr())).unwrap();
-    terminal.clear().unwrap();
+    let mut terminal = Terminal::new(CrosstermBackend::new(stderr()))?;
+    terminal.clear()?;
 
     let mut app = {
-        let rect = terminal.size().unwrap();
+        let rect = terminal.size()?;
         App::new(
             rect.as_size(),
             None::<Cow<Utf8Path>>,
-            cache.get_max_file_sizes(None::<&str>).unwrap(),
+            cache.get_max_file_sizes(None::<&str>)?,
             cache.get_marks().unwrap(),
         )
     };
 
     let mut output_lines = vec![];
 
-    render(&mut terminal, &app).unwrap();
+    render(&mut terminal, &app)?;
     'outer: loop {
-        let mut o_event = convert_event(crossterm::event::read().unwrap());
+        let mut o_event = convert_event(crossterm::event::read()?);
         while let Some(event) = o_event {
             o_event = match app.update(event) {
                 Action::Nothing =>
                     None,
                 Action::Render => {
-                    render(&mut terminal, &app).unwrap();
+                    render(&mut terminal, &app)?;
                     None
                 }
                 Action::Quit =>
@@ -175,34 +174,35 @@ fn main() {
                     break 'outer
                 }
                 Action::GetEntries(path) => {
-                    let children = cache.get_max_file_sizes(path.as_deref()).unwrap();
+                    let children = cache.get_max_file_sizes(path.as_deref())?;
                     Some(Event::Entries {
                         parent: path,
                         children
                     })
                 }
                 Action::UpsertMark(path) => {
-                    cache.upsert_mark(&path).unwrap();
-                    Some(Event::Marks(cache.get_marks().unwrap()))
+                    cache.upsert_mark(&path)?;
+                    Some(Event::Marks(cache.get_marks()?))
                 }
                 Action::DeleteMark(path) => {
                     cache.delete_mark(&path).unwrap();
-                    Some(Event::Marks(cache.get_marks().unwrap()))
+                    Some(Event::Marks(cache.get_marks()?))
                 }
                 Action::DeleteAllMarks => {
-                    cache.delete_all_marks().unwrap();
+                    cache.delete_all_marks()?;
                     Some(Event::Marks(Vec::new()))
                 }
             }
         }
     }
 
-    disable_raw_mode().unwrap();
-    stderr().execute(LeaveAlternateScreen).unwrap();
+    disable_raw_mode()?;
+    stderr().execute(LeaveAlternateScreen)?;
 
     for line in output_lines {
         println!("{line}");
     }
+    Ok(())
 }
 
 fn update_snapshots(
@@ -210,21 +210,19 @@ fn update_snapshots(
     cache: &mut Cache,
     fetching_thread_count: usize,
     group_size: usize,
-) {
+) -> anyhow::Result<()> {
     // Figure out what snapshots we need to fetch
     let missing_snapshots: Vec<Box<str>> = {
         let mut pb = new_pb_with_style(
             "Fetching repository snapshot list {spinner}");
         pb_enable_tick(&mut pb);
-        let repo_snapshots = restic.snapshots()
-            .unwrap()
+        let repo_snapshots = restic.snapshots()?
             .into_iter()
             .map(|s| s.id)
             .collect::<Vec<Box<str>>>();
         pb.finish();
         { // Delete snapshots from the DB that were deleted on the repo
-            let snapshots_to_delete = cache.get_snapshots()
-                .unwrap()
+            let snapshots_to_delete = cache.get_snapshots()?
                 .into_iter()
                 .filter(|snapshot| ! repo_snapshots.contains(&snapshot))
                 .collect::<Vec<_>>();
@@ -233,17 +231,17 @@ fn update_snapshots(
                 let mut pb = new_pb_with_style(
                     &format!("Deleting snapshot {short_id} {{spinner}}"));
                 pb_enable_tick(&mut pb);
-                cache.delete_snapshots([snapshot]).unwrap();
+                cache.delete_snapshots([snapshot])?;
                 pb.finish();
             }
         }
 
-        let db_snapshots = cache.get_snapshots().unwrap();
+        let db_snapshots = cache.get_snapshots()?;
         repo_snapshots.into_iter().filter(|s| ! db_snapshots.contains(s)).collect()
     };
 
     let total_missing_snapshots = match missing_snapshots.len() {
-        0 => { eprintln!("Snapshots up to date"); return; },
+        0 => { eprintln!("Snapshots up to date"); return Ok(()); },
         n => n,
     };
  
@@ -293,7 +291,9 @@ fn update_snapshots(
 
         // Start DB thread
         scope.spawn(move || db_thread_body(cache, group_receiver));
-    })
+        
+    });
+    Ok(())
 }
 
 fn fetching_thread_body(
@@ -301,15 +301,15 @@ fn fetching_thread_body(
     missing_queue: Queue<Box<str>>,
     snapshot_sender: mpsc::SyncSender<(Box<str>, FileTree)>,
     mut speed: Speed,
-) {
+) -> anyhow::Result<()> {
     while let Some(snapshot) = missing_queue.pop() {
         let short_id = snapshot_short_id(&snapshot);
         let mut filetree = FileTree::new();
-        let files = restic.ls(&snapshot).unwrap();
+        let files = restic.ls(&snapshot)?;
         trace!("(fetching-thread) started fetching snapshot ({short_id})");
         let start = Instant::now();
         for r in files {
-            let (file, bytes_read) = r.unwrap();
+            let (file, bytes_read) = r?;
             speed.inc(bytes_read);
             filetree.insert(&file.path, file.size)
                 .expect("repeated entry in restic snapshot ls");
@@ -318,12 +318,13 @@ fn fetching_thread_body(
                         start.elapsed().as_secs_f64());
         trace!("(fetching-thread) got snapshot, sending ({short_id})");
         let start = Instant::now();
-        snapshot_sender.send((snapshot.clone(), filetree)).unwrap();
+        snapshot_sender.send((snapshot.clone(), filetree))?;
         info!("(fetching-thread) waited {}s to send snapshot ({short_id})",
                         start.elapsed().as_secs_f64());
         trace!("(fetching-thread) snapshot sent ({short_id})");
     }
     speed.stop();
+    Ok(())
 }
 
 fn grouping_thread_body(
@@ -331,7 +332,7 @@ fn grouping_thread_body(
     snapshot_receiver: mpsc::Receiver<(Box<str>, FileTree)>,
     group_sender: mpsc::SyncSender<SnapshotGroup>,
     pb: ProgressBar,
-) {
+) -> anyhow::Result<()> {
     let mut group = SnapshotGroup::new();
     loop {
         trace!("(grouping-thread) waiting for snapshot");
@@ -370,12 +371,13 @@ fn grouping_thread_body(
         trace!("(grouping-thread) sent leftover group");
     }
     pb.finish_with_message("Done");
+    Ok(())
 }
 
 fn db_thread_body(
     cache: &mut Cache,
     group_receiver: mpsc::Receiver<SnapshotGroup>,
-) {
+) -> anyhow::Result<()> {
     loop {
         trace!("(db-thread) waiting for group");
         let start = Instant::now();
@@ -393,7 +395,7 @@ fn db_thread_body(
             }
             Err(_) => {
                 trace!("(db-thread) loop done");
-                break
+                break Ok(())
             }
         }
     }

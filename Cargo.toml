@@ -4,11 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+anyhow = "*"
 camino = "*"
 chrono = "*"
 clap = { version = "*", features = ["derive"] }
 crossterm = "*"
 directories = "5"
+fallible-iterator = "*"
 flexi_logger = "*"
 humansize = "*"
 indicatif = "*"
@@ -18,8 +20,8 @@ ratatui = { version = "*", features = ["unstable-widget-ref"] }
 rusqlite = { version = "*", features = ["bundled", "functions", "trace"] }
 serde = { version = "*", features = ["derive"] }
 serde_json = "*"
+thiserror = "*"
 unicode-segmentation = "*"
-fallible-iterator = "*"
 
 [lib]
 path = "src/lib.rs"
