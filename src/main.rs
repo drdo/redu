@@ -52,6 +52,14 @@ mod ui;
 /// only the marks list is generated to stdout.
 ///   This means that you can pipe redu directly to a file
 /// to get the exclude-file.
+///
+/// Keybinds:
+/// hjkl or arrows: movement
+/// m: mark
+/// u: unmark
+/// c: clear all marks
+/// g: generate
+/// q: quit
 #[derive(Parser)]
 #[command(version, long_about, verbatim_doc_comment)]
 struct Cli {
