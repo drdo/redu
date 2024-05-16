@@ -321,7 +321,9 @@ impl WidgetRef for App {
                 remaining_width -= 1;
             }
             string.push_str(&"-".repeat(remaining_width));
-            Paragraph::new(string).render_ref(heading_rect, buf);
+            Paragraph::new(string)
+                .on_light_blue()
+                .render_ref(heading_rect, buf);
         }
 
         { // List
