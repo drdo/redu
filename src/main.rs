@@ -36,8 +36,24 @@ use crate::ui::Event;
 
 mod ui;
 
+/// This is like ncdu for a restic respository.
+/// 
+/// It computes the size for each directory/file by
+/// taking the largest over all snapshots in the repository.
+/// 
+/// You can browse your repository and mark directories/files.
+/// These marks are persisted across runs of redu.
+/// 
+/// When you're happy with the marks you can generate
+/// a list to stdout with everything that you marked.
+///   This list can be used directly as an exclude-file for restic.
+/// 
+/// redu keeps all messages and UI in stderr,
+/// only the marks list is generated to stdout.
+///   This means that you can pipe redu directly to a file
+/// to get the exclude-file.
 #[derive(Parser)]
-#[command(version, about, long_about = None)]
+#[command(version, long_about, verbatim_doc_comment)]
 struct Cli {
     #[arg(short = 'r', long)]
     repo: String,
