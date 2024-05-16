@@ -88,6 +88,12 @@ struct Cli {
 }
 
 fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+    let restic = Restic::new(
+        cli.repo,
+        cli.password_command
+    );
+
     let dirs = ProjectDirs::from("eu", "drdo", "redu")
         .expect("unable to determine project directory");
  
@@ -115,12 +121,6 @@ fn main() -> anyhow::Result<()> {
             error!(target: "sqlite", "({code}) {msg}");
         }))?;
     }
-
-    let cli = Cli::parse();
-    let restic = Restic::new(
-        cli.repo,
-        cli.password_command
-    );
 
     let mut cache = { // Get config to determine repo id and open cache
         let mut pb = new_pb_with_style("Getting restic config {spinner}");
