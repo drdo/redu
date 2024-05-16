@@ -48,7 +48,7 @@ mod ui;
 /// a list to stdout with everything that you marked.
 ///   This list can be used directly as an exclude-file for restic.
 /// 
-/// redu keeps all messages and UI in stderr,
+/// Redu keeps all messages and UI in stderr,
 /// only the marks list is generated to stdout.
 ///   This means that you can pipe redu directly to a file
 /// to get the exclude-file.
