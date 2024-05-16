@@ -25,10 +25,10 @@ use ratatui::widgets::WidgetRef;
 use scopeguard::defer;
 use thiserror::Error;
 
-use dorestic::{cache, restic};
-use dorestic::cache::{Cache, SnapshotGroup};
-use dorestic::cache::filetree::FileTree;
-use dorestic::restic::Restic;
+use redu::{cache, restic};
+use redu::cache::{Cache, SnapshotGroup};
+use redu::cache::filetree::FileTree;
+use redu::restic::Restic;
 
 use crate::ui::Action;
 use crate::ui::App;
@@ -72,7 +72,7 @@ struct Cli {
 }
 
 fn main() -> anyhow::Result<()> {
-    let dirs = ProjectDirs::from("eu", "drdo", "dorestic")
+    let dirs = ProjectDirs::from("eu", "drdo", "redu")
         .expect("unable to determine project directory");
  
     let _logger = {
