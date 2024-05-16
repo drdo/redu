@@ -94,6 +94,13 @@ struct Cli {
             that that snapshot belongs to."
     )]
     group_size: usize,
+    #[arg(
+        short = 'v',
+        action = clap::ArgAction::Count,
+        long_help =
+            "Log verbosity level. You can pass it multiple times (maxes out at two)."
+    )]
+    verbose: u8,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -118,7 +125,12 @@ fn main() -> anyhow::Result<()> {
                 .suppress_basename()
         };
         
-        Logger::with(LogSpecification::info())
+        let spec = match cli.verbose {
+            0 => LogSpecification::info(),
+            1 => LogSpecification::debug(),
+            _ => LogSpecification::trace(),
+        };
+        Logger::with(spec)
             .log_to_file(filespec)
             .write_mode(WriteMode::BufferAndFlush)
             .format(flexi_logger::detailed_format)
