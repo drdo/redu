@@ -49,7 +49,6 @@ pub struct App {
     path: Option<Utf8PathBuf>,
     entries: Vec<Entry>,
     marks: HashSet<Utf8PathBuf>,
-    heading_size: Size,
     list_size: Size,
     selected: usize,
     offset: usize,
@@ -66,12 +65,11 @@ impl App {
     where
         P: Into<Cow<'a, Utf8Path>>,
     {
-        let (heading_size, list_size) = compute_sizes(screen);
+        let list_size = compute_list_size(screen);
         App {
             path: path.map(|p| p.into().into_owned()),
             entries,
             marks: HashSet::from_iter(marks.into_iter()),
-            heading_size,
             list_size,
             selected: 0,
             offset: 0,
@@ -99,7 +97,7 @@ impl App {
     }
 
     fn resize(&mut self, new_size: Size) -> Action {
-        (self.heading_size, self.list_size) = compute_sizes(new_size);
+        self.list_size = compute_list_size(new_size);
         self.fix_offset();
         Action::Render
     }
@@ -300,7 +298,7 @@ impl ListEntry {
 
 impl WidgetRef for App {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
-        let (heading_rect, list_rect) = compute_layout(area);
+        let (header_rect, list_rect, footer_rect) = compute_layout(area);
         { // Heading
             let mut string = "--- ".to_string();
             string.push_str(
@@ -309,12 +307,12 @@ impl WidgetRef for App {
                         None => "#",
                         Some(path) => path.as_str(),
                     },
-                    heading_rect.width as usize - string.len()
+                    header_rect.width as usize - string.len()
                 ).as_ref()
             );
             let mut remaining_width = max(
                 0,
-                heading_rect.width as isize - 4 - string.len() as isize
+                header_rect.width as isize - 4 - string.len() as isize
             ) as usize;
             if remaining_width > 0 {
                 string.push(' ');
@@ -323,7 +321,7 @@ impl WidgetRef for App {
             string.push_str(&"-".repeat(remaining_width));
             Paragraph::new(string)
                 .on_light_blue()
-                .render_ref(heading_rect, buf);
+                .render_ref(header_rect, buf);
         }
 
         { // List
@@ -344,6 +342,13 @@ impl WidgetRef for App {
                     )
                 )});
             List::new(items).render_ref(list_rect, buf)
+        }
+
+        { // Footer
+            let span = Span::from(format!("Marks: {}", self.marks.len()));
+            Paragraph::new(span)
+                .on_light_blue()
+                .render_ref(footer_rect, buf);
         }
     }
 }
@@ -401,20 +406,21 @@ fn shorten_to(s: &str, width: usize) -> Cow<str> {
 
 /// Misc //////////////////////////////////////////////////////////////////////
 
-fn compute_sizes(area: Size) -> (Size, Size) {
-    let (heading, list) = compute_layout((Position::new(0, 0), area).into());
-    (heading.as_size(), list.as_size())
+fn compute_list_size(area: Size) -> Size {
+    let (_, list, _) = compute_layout((Position::new(0, 0), area).into());
+    list.as_size()
 }
 
-fn compute_layout(area: Rect) -> (Rect, Rect) {
+fn compute_layout(area: Rect) -> (Rect, Rect, Rect) {
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),
             Constraint::Fill(100),
+            Constraint::Length(1),
         ])
         .split(area);
-    (layout[0], layout[1])
+    (layout[0], layout[1], layout[2])
 }
 
 /// Tests //////////////////////////////////////////////////////////////////////
