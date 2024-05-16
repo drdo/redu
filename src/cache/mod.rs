@@ -2,7 +2,6 @@ use std::cell::Cell;
 use std::path::Path;
 
 use camino::{Utf8Path, Utf8PathBuf};
-use fallible_iterator::FallibleIterator;
 use log::trace;
 use rusqlite::{Connection, params, Row};
 use rusqlite::functions::FunctionFlags;
@@ -167,32 +166,23 @@ impl Cache {
         tx.commit()
     }
 
-    pub fn delete_snapshots<Id, It>(
-        &mut self,
-        ids: It
-    ) -> Result<(), rusqlite::Error>
-    where
-        Id: AsRef<str>,
-        It: IntoIterator<Item=Id>
+    pub fn get_snapshot_group(
+        &self,
+        id: impl AsRef<str>,
+    ) -> Result<u64, rusqlite::Error>
     {
+        self.conn.query_row_and_then(
+            r#"SELECT "group" FROM snapshots WHERE id = ?"#,
+            [id.as_ref()],
+            |row| row.get(0)
+        )
+    }
+
+    pub fn delete_group(&mut self, id: u64) -> Result<(), rusqlite::Error> {
         let tx = self.conn.transaction()?;
-        {
-            let mut get_groups_stmt = {
-                let sql = ids.into_iter()
-                    .map(|id| format!(r#"SELECT "group" FROM snapshots WHERE id = '{}'"#, id.as_ref()))
-                    .intersperse(" UNION ALL ".into())
-                    .collect::<String>();
-                tx.prepare(&sql)?
-            };
-            let mut groups = get_groups_stmt
-                .query([])?
-                .map(|row| row.get::<usize, u64>(0));
-            while let Some(group) = groups.next()? {
-                tx.execute(r#"DELETE FROM snapshots WHERE "group" = ?"#, params![group])?;
-                tx.execute(r#"DELETE FROM files WHERE snapshot_group = ?"#, params![group])?;
-                tx.execute(r#"DELETE FROM directories WHERE snapshot_group = ?"#, params![group])?;
-            }
-        }
+        tx.execute(r#"DELETE FROM snapshots WHERE "group" = ?"#, [id])?;
+        tx.execute(r#"DELETE FROM files WHERE snapshot_group = ?"#, [id])?;
+        tx.execute(r#"DELETE FROM directories WHERE snapshot_group = ?"#, [id])?;
         tx.commit()
     }
  

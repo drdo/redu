@@ -2,6 +2,7 @@
 
 use std::{fs, panic, thread};
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::io::stderr;
 use std::sync::{Arc, mpsc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -124,7 +125,7 @@ fn main() -> anyhow::Result<()> {
                 .directory(directory)
                 .suppress_basename()
         };
-        
+
         let spec = match cli.verbose {
             0 => LogSpecification::info(),
             1 => LogSpecification::debug(),
@@ -144,8 +145,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     let mut cache = { // Get config to determine repo id and open cache
-        let mut pb = new_pb_with_style("Getting restic config {spinner}");
-        pb_enable_tick(&mut pb);
+        let pb = new_pb("Getting restic config {spinner}");
         let repo_id = restic.config()?.id;
         pb.finish();
 
@@ -265,28 +265,27 @@ fn sync_snapshots(
 ) -> anyhow::Result<()> {
     // Figure out what snapshots we need to fetch
     let missing_snapshots: Vec<Box<str>> = {
-        let mut pb = new_pb_with_style(
-            "Fetching repository snapshot list {spinner}");
-        pb_enable_tick(&mut pb);
+        let pb = new_pb("Fetching repository snapshot list {spinner}");
         let repo_snapshots = restic.snapshots()?
             .into_iter()
             .map(|s| s.id)
             .collect::<Vec<Box<str>>>();
         pb.finish();
         { // Delete snapshots from the DB that were deleted on the repo
-            let snapshots_to_delete = cache.get_snapshots()?
+            let groups_to_delete = cache.get_snapshots()?
                 .into_iter()
                 .filter(|snapshot| ! repo_snapshots.contains(&snapshot))
-                .collect::<Vec<_>>();
-            eprintln!("Need to delete {} snapshots", snapshots_to_delete.len());
-            for snapshot in snapshots_to_delete {
-                let short_id = snapshot_short_id(&snapshot);
-                let mut pb = new_pb_with_style(
-                    &format!("Deleting snapshot {short_id} {{spinner}}"));
-                pb_enable_tick(&mut pb);
-                cache.delete_snapshots([snapshot])?;
-                pb.finish();
+                .map(|snapshot_id| cache.get_snapshot_group(snapshot_id))
+                .collect::<Result<HashSet<u64>, rusqlite::Error>>()?;
+            
+            eprintln!("Need to delete {} groups", groups_to_delete.len());
+            let pb = new_pb("{wide_bar} [{pos}/{len}] {spinner}");
+            pb.set_length(groups_to_delete.len() as u64);
+            for group in groups_to_delete {
+                cache.delete_group(group)?;
+                pb.inc(1);
             }
+            pb.finish();
         }
 
         let db_snapshots = cache.get_snapshots()?;
@@ -303,9 +302,8 @@ fn sync_snapshots(
     let missing_queue = Queue::new(missing_snapshots);
  
     // Create progress indicators
-    let mut pb = new_pb_with_style("{wide_bar} [{pos}/{len}] {msg}");
+    let pb = new_pb("{wide_bar} [{pos}/{len}] {msg}");
     pb.set_length(total_missing_snapshots as u64);
-    pb_enable_tick(&mut pb);
     let speed = {
         let pb = pb.clone();
         Speed::new(move |v| {
@@ -647,15 +645,12 @@ impl Speed {
     }
 }
 
-pub fn new_pb_with_style(style: &str) -> ProgressBar
+pub fn new_pb(style: &str) -> ProgressBar
 {
-    ProgressBar::new_spinner()
-        .with_style(ProgressStyle::with_template(style).unwrap())
-}
-
-fn pb_enable_tick(pb: &mut ProgressBar) {
-    const TICK_INTERVAL: u64 = 300;
-    pb.enable_steady_tick(Duration::from_millis(TICK_INTERVAL));
+    let pb = ProgressBar::new_spinner()
+        .with_style(ProgressStyle::with_template(style).unwrap());
+    pb.enable_steady_tick(Duration::from_millis(500));
+    pb
 }
 
 fn snapshot_short_id(id: &str) -> String {
