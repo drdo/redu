@@ -118,7 +118,7 @@ fn main() -> anyhow::Result<()> {
                 .suppress_basename()
         };
         
-        Logger::with(LogSpecification::trace())
+        Logger::with(LogSpecification::info())
             .log_to_file(filespec)
             .write_mode(WriteMode::BufferAndFlush)
             .format(flexi_logger::detailed_format)
