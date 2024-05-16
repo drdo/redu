@@ -429,6 +429,7 @@ dependencies = [
  "nix",
  "ratatui",
  "rusqlite",
+ "scopeguard",
  "serde",
  "serde_json",
  "thiserror",

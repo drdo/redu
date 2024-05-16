@@ -4,6 +4,9 @@ use std::{fs, panic, thread};
 use std::borrow::Cow;
 use std::io::stderr;
 use std::sync::{Arc, mpsc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::RecvTimeoutError;
+use std::thread::ScopedJoinHandle;
 use std::time::{Duration, Instant};
 
 use camino::Utf8Path;
@@ -19,8 +22,10 @@ use ratatui::{CompletedFrame, Terminal};
 use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::layout::Size;
 use ratatui::widgets::WidgetRef;
+use scopeguard::defer;
+use thiserror::Error;
 
-use dorestic::cache;
+use dorestic::{cache, restic};
 use dorestic::cache::{Cache, SnapshotGroup};
 use dorestic::cache::filetree::FileTree;
 use dorestic::restic::Restic;
@@ -43,7 +48,10 @@ struct Cli {
         long,
         default_value_t = 4,
         long_help = "
-            How many restic subprocesses to spawn concurrently",
+            How many restic subprocesses to spawn concurrently.
+            
+            If you get ssh-related errors or too much memory use
+            try lowering this.",
     )]
     fetching_thread_count: usize,
     #[arg(
@@ -79,7 +87,7 @@ fn main() -> anyhow::Result<()> {
                 .suppress_basename()
         };
         
-        Logger::with(LogSpecification::debug())
+        Logger::with(LogSpecification::trace())
             .log_to_file(filespec)
             .write_mode(WriteMode::BufferAndFlush)
             .format(flexi_logger::detailed_format)
@@ -248,12 +256,7 @@ fn sync_snapshots(
  
     eprintln!("Fetching {} snapshots", total_missing_snapshots);
 
-    // Create queues and channels
     let missing_queue = Queue::new(missing_snapshots);
-    let (snapshot_sender, snapshot_receiver) =
-        mpsc::sync_channel::<(Box<str>, FileTree)>(2);
-    let (group_sender, group_receiver) =
-        mpsc::sync_channel::<SnapshotGroup>(1);
  
     // Create progress indicators
     let mut pb = new_pb_with_style("{wide_bar} [{pos}/{len}] {msg}");
@@ -267,34 +270,90 @@ fn sync_snapshots(
             pb.set_message(format!("({msg:>12})"))
         })
     };
-
+ 
     thread::scope(|scope| {
+        let mut handles: Vec<ScopedJoinHandle<anyhow::Result<()>>> = Vec::new();
+
+        // The threads periodically poll this to see if they should
+        // prematurely terminate (when other threads get unrecoverable errors).
+        let should_quit: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+
+        // Channel to funnel snapshots from the fetching threads to the grouping thread
+        let (snapshot_sender, snapshot_receiver) =
+            mpsc::sync_channel::<(Box<str>, FileTree)>(2);
+ 
         // Start fetching threads
         for _ in 0..fetching_thread_count {
             let missing_queue = missing_queue.clone();
             let snapshot_sender = snapshot_sender.clone();
             let speed = speed.clone();
-            scope.spawn(move || fetching_thread_body(
-                restic,
-                missing_queue,
-                snapshot_sender,
-                speed,
-            ));
+            let should_quit = should_quit.clone();
+            handles.push(scope.spawn(move || {
+                fetching_thread_body(
+                    restic,
+                    missing_queue,
+                    snapshot_sender,
+                    speed,
+                    should_quit.clone(),
+                )
+                    .inspect_err(|_| should_quit.store(true, Ordering::SeqCst))
+                    .map_err(anyhow::Error::from)
+            }));
         }
+        // Drop the leftover channel so that the grouping thread
+        // can properly terminate when all snapshot senders are closed
+        drop(snapshot_sender);
 
+        // Channel to funnel groups from the grouping thread to the db thread
+        let (group_sender, group_receiver) =
+            mpsc::sync_channel::<SnapshotGroup>(1);
+ 
         // Start grouping thread
-        scope.spawn(move || grouping_thread_body(
-            group_size,
-            snapshot_receiver,
-            group_sender,
-            pb,
-        ));
+        handles.push({
+            let should_quit = should_quit.clone();
+            scope.spawn(move || {
+                grouping_thread_body(
+                    group_size,
+                    snapshot_receiver,
+                    group_sender,
+                    pb,
+                    should_quit.clone(),
+                )
+                    .inspect_err(|_| should_quit.store(true, Ordering::SeqCst))
+                    .map_err(anyhow::Error::from)
+            })
+        });
 
         // Start DB thread
-        scope.spawn(move || db_thread_body(cache, group_receiver));
-        
-    });
-    Ok(())
+        handles.push({
+            let should_quit = should_quit.clone();
+            scope.spawn(move || {
+                db_thread_body(
+                    cache,
+                    group_receiver,
+                    should_quit.clone()
+                )
+                    .inspect_err(|_| should_quit.store(true, Ordering::SeqCst))
+                    .map_err(anyhow::Error::from)
+            })
+        });
+
+        // Drop the senders that weren't moved into threads so that
+        // the receivers can detect when everyone is done
+ 
+        for handle in handles {
+            handle.join().unwrap()?
+        }
+        Ok(())
+    })
+}
+
+#[derive(Debug, Error)]
+#[error("error in fetching thread")]
+enum FetchingThreadError {
+    ResticLaunchError(#[from] restic::LaunchError),
+    ResticError(#[from] restic::Error),
+    CacheError(#[from] rusqlite::Error),
 }
 
 fn fetching_thread_body(
@@ -302,7 +361,11 @@ fn fetching_thread_body(
     missing_queue: Queue<Box<str>>,
     snapshot_sender: mpsc::SyncSender<(Box<str>, FileTree)>,
     mut speed: Speed,
-) -> anyhow::Result<()> {
+    should_quit: Arc<AtomicBool>,
+) -> Result<(), FetchingThreadError>
+{
+    defer! { trace!("(fetching-thread) terminated") }
+    trace!("(fetching-thread) started");
     while let Some(snapshot) = missing_queue.pop() {
         let short_id = snapshot_short_id(&snapshot);
         let mut filetree = FileTree::new();
@@ -310,6 +373,7 @@ fn fetching_thread_body(
         trace!("(fetching-thread) started fetching snapshot ({short_id})");
         let start = Instant::now();
         for r in files {
+            if should_quit.load(Ordering::SeqCst) { return Ok(()); }
             let (file, bytes_read) = r?;
             speed.inc(bytes_read);
             filetree.insert(&file.path, file.size)
@@ -318,8 +382,9 @@ fn fetching_thread_body(
         info!("(fetching-thread) snapshot fetched in {}s ({short_id})",
                         start.elapsed().as_secs_f64());
         trace!("(fetching-thread) got snapshot, sending ({short_id})");
+        if should_quit.load(Ordering::SeqCst) { return Ok(()); }
         let start = Instant::now();
-        snapshot_sender.send((snapshot.clone(), filetree))?;
+        snapshot_sender.send((snapshot.clone(), filetree)).unwrap();
         info!("(fetching-thread) waited {}s to send snapshot ({short_id})",
                         start.elapsed().as_secs_f64());
         trace!("(fetching-thread) snapshot sent ({short_id})");
@@ -328,27 +393,41 @@ fn fetching_thread_body(
     Ok(())
 }
 
+#[derive(Debug, Error)]
+#[error("error in grouping thread")]
+enum GroupingThreadError {
+    CacheError(#[from] rusqlite::Error),
+}
+
 fn grouping_thread_body(
     group_size: usize,
     snapshot_receiver: mpsc::Receiver<(Box<str>, FileTree)>,
     group_sender: mpsc::SyncSender<SnapshotGroup>,
     pb: ProgressBar,
-) -> anyhow::Result<()> {
+    should_quit: Arc<AtomicBool>,
+) -> Result<(), GroupingThreadError>
+{
+    defer! { trace!("(grouping-thread) terminated") }
+    trace!("(grouping-thread) started");
     let mut group = SnapshotGroup::new();
     loop {
         trace!("(grouping-thread) waiting for snapshot");
+        if should_quit.load(Ordering::SeqCst) { return Ok(()); }
         let start = Instant::now();
-        match snapshot_receiver.recv() {
+        // We wait with timeout to poll the should_quit periodically
+        match snapshot_receiver.recv_timeout(Duration::from_millis(500)) {
             Ok((snapshot, filetree)) => {
                 let short_id = snapshot_short_id(&snapshot);
                 info!("(grouping-thread) waited {}s to get snapshot ({short_id})",
                                 start.elapsed().as_secs_f64());
                 trace!("(grouping-thread) got snapshot ({short_id})");
+                if should_quit.load(Ordering::SeqCst) { return Ok(()); }
                 group.add_snapshot(snapshot.clone(), filetree);
                 pb.inc(1);
                 trace!("(grouping-thread) added snapshot ({short_id})");
                 if group.count() == group_size {
                     trace!("(grouping-thread) group is full, sending");
+                    if should_quit.load(Ordering::SeqCst) { return Ok(()); }
                     let start = Instant::now();
                     group_sender.send(group).unwrap();
                     info!("(grouping-thread) waited {}s to send group",
@@ -357,7 +436,10 @@ fn grouping_thread_body(
                     group = SnapshotGroup::new();
                 }
             }
-            Err(_) => {
+            Err(RecvTimeoutError::Timeout) => {
+                continue
+            }
+            Err(RecvTimeoutError::Disconnected) => {
                 trace!("(grouping-thread) loop done");
                 break
             }
@@ -365,6 +447,7 @@ fn grouping_thread_body(
     }
     if group.count() > 0 {
         trace!("(grouping-thread) sending leftover group");
+        if should_quit.load(Ordering::SeqCst) { return Ok(()); }
         let start = Instant::now();
         group_sender.send(group).unwrap();
         info!("(grouping-thread) waited {}s to send leftover group",
@@ -375,18 +458,31 @@ fn grouping_thread_body(
     Ok(())
 }
 
+#[derive(Debug, Error)]
+#[error("error in db thread")]
+enum DBThreadError {
+    CacheError(#[from] rusqlite::Error),
+}
+
 fn db_thread_body(
     cache: &mut Cache,
     group_receiver: mpsc::Receiver<SnapshotGroup>,
-) -> anyhow::Result<()> {
+    should_quit: Arc<AtomicBool>,
+) -> Result<(), DBThreadError>
+{
+    defer! { trace!("(db-thread) terminated") }
+    trace!("(db-thread) started");
     loop {
         trace!("(db-thread) waiting for group");
+        if should_quit.load(Ordering::SeqCst) { return Ok(()); }
         let start = Instant::now();
-        match group_receiver.recv() {
+        // We wait with timeout to poll the should_quit periodically
+        match group_receiver.recv_timeout(Duration::from_millis(500)) {
             Ok(group) => {
                 info!("(db-thread) waited {}s to get group",
                     start.elapsed().as_secs_f64());
                 trace!("(db-thread) got group, saving");
+                if should_quit.load(Ordering::SeqCst) { return Ok(()); }
                 let start = Instant::now();
                 cache.save_snapshot_group(group)
                     .expect("unable to save snapshot group");
@@ -394,7 +490,10 @@ fn db_thread_body(
                     start.elapsed().as_secs_f64());
                 trace!("(db-thread) group saved");
             }
-            Err(_) => {
+            Err(RecvTimeoutError::Timeout) => {
+                continue
+            }
+            Err(RecvTimeoutError::Disconnected) => {
                 trace!("(db-thread) loop done");
                 break Ok(())
             }

@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "*"
+scopeguard = "*"
 camino = "*"
 chrono = "*"
 clap = { version = "*", features = ["derive"] }
