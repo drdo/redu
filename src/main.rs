@@ -21,6 +21,7 @@ use log::{error, info, trace};
 use ratatui::{CompletedFrame, Terminal};
 use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::layout::Size;
+use ratatui::style::Stylize;
 use ratatui::widgets::WidgetRef;
 use scopeguard::defer;
 use thiserror::Error;
@@ -37,17 +38,17 @@ use crate::ui::Event;
 mod ui;
 
 /// This is like ncdu for a restic respository.
-/// 
+///
 /// It computes the size for each directory/file by
 /// taking the largest over all snapshots in the repository.
-/// 
+///
 /// You can browse your repository and mark directories/files.
 /// These marks are persisted across runs of redu.
-/// 
+///
 /// When you're happy with the marks you can generate
 /// a list to stdout with everything that you marked.
 ///   This list can be used directly as an exclude-file for restic.
-/// 
+///
 /// Redu keeps all messages and UI in stderr,
 /// only the marks list is generated to stdout.
 ///   This means that you can pipe redu directly to a file
@@ -183,7 +184,13 @@ fn main() -> anyhow::Result<()> {
             None::<Cow<Utf8Path>>,
             cache.get_max_file_sizes(None::<&str>)?,
             cache.get_marks().unwrap(),
-            "m: mark - u: unmark - c: clear all marks - g: generate - q: quit".into(),
+            vec![
+                "m".bold(), ": mark - ".into(),
+                "u".bold(), ": unmark - ".into(),
+                "c".bold(), ": clear all marks - ".into(),
+                "g".bold(), ": generate - ".into(),
+                "q".bold(), ": quit".into(),
+            ],
         )
     };
 
