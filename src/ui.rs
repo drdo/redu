@@ -52,6 +52,7 @@ pub struct App {
     list_size: Size,
     selected: usize,
     offset: usize,
+    footer_extra_text: String,
 }
 
 impl App {
@@ -61,6 +62,7 @@ impl App {
         path: Option<P>,
         entries: Vec<Entry>,
         marks: Vec<Utf8PathBuf>,
+        footer_extra_text: String
     ) -> Self
     where
         P: Into<Cow<'a, Utf8Path>>,
@@ -73,6 +75,7 @@ impl App {
             list_size,
             selected: 0,
             offset: 0,
+            footer_extra_text,
         }
     }
 
@@ -345,8 +348,12 @@ impl WidgetRef for App {
         }
 
         { // Footer
-            let span = Span::from(format!("Marks: {}", self.marks.len()));
-            Paragraph::new(span)
+            let spans = vec![
+                Span::from(format!(" Marks: {}", self.marks.len())),
+                Span::from("  |  "),
+                Span::from(&self.footer_extra_text),
+            ];
+            Paragraph::new(Line::from(spans))
                 .on_light_blue()
                 .render_ref(footer_rect, buf);
         }

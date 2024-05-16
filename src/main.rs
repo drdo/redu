@@ -183,6 +183,7 @@ fn main() -> anyhow::Result<()> {
             None::<Cow<Utf8Path>>,
             cache.get_max_file_sizes(None::<&str>)?,
             cache.get_marks().unwrap(),
+            "m: mark - u: unmark - c: clear all marks - g: generate - q: quit".into(),
         )
     };
 
