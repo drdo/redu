@@ -40,10 +40,27 @@ struct Cli {
     password_command: Option<String>,
     #[arg(
         short = 'j',
-        default_value = None,
-        long_help = "How many restic subprocesses to spawn concurrently.\nDefaults to the available number of CPUs",
+        long,
+        default_value_t = 4,
+        long_help = "
+            How many restic subprocesses to spawn concurrently",
     )]
-    parallelism: Option<usize>,
+    fetching_thread_count: usize,
+    #[arg(
+        long,
+        default_value_t = 8,
+        long_help = "
+            How big to make each group of snapshots.
+
+            A group is saved by merging the info of the snapshots in the group.
+            This is primarily to save disk space but it also speeds up
+            writing to the cache when doing a sync.
+
+            The disadvantage is that if we need to delete a snapshot because
+            it was removed from the repo then we must delete the entire group
+            that that snapshot belongs to."
+    )]
+    group_size: usize,
 }
 
 fn main() {
@@ -112,9 +129,7 @@ fn main() {
         }.expect("unable to open cache file")
     };
 
-    let parallelism = cli.parallelism.unwrap_or(
-        thread::available_parallelism().unwrap().get());
-    update_snapshots(&restic, &mut cache, parallelism);
+    update_snapshots(&restic, &mut cache, cli.fetching_thread_count, cli.group_size);
  
     // UI
     stderr().execute(EnterAlternateScreen).unwrap();
@@ -193,7 +208,8 @@ fn main() {
 fn update_snapshots(
     restic: &Restic,
     cache: &mut Cache,
-    parallelism: usize,
+    fetching_thread_count: usize,
+    group_size: usize,
 ) {
     // Figure out what snapshots we need to fetch
     let missing_snapshots: Vec<Box<str>> = {
@@ -255,7 +271,7 @@ fn update_snapshots(
 
     thread::scope(|scope| {
         // Start fetching threads
-        for _ in 0..parallelism {
+        for _ in 0..fetching_thread_count {
             let missing_queue = missing_queue.clone();
             let snapshot_sender = snapshot_sender.clone();
             let speed = speed.clone();
@@ -269,6 +285,7 @@ fn update_snapshots(
 
         // Start grouping thread
         scope.spawn(move || grouping_thread_body(
+            group_size,
             snapshot_receiver,
             group_sender,
             pb,
@@ -310,11 +327,11 @@ fn fetching_thread_body(
 }
 
 fn grouping_thread_body(
+    group_size: usize,
     snapshot_receiver: mpsc::Receiver<(Box<str>, FileTree)>,
     group_sender: mpsc::SyncSender<SnapshotGroup>,
     pb: ProgressBar,
 ) {
-    const GROUP_SIZE: usize = 8;
     let mut group = SnapshotGroup::new();
     loop {
         trace!("(grouping-thread) waiting for snapshot");
@@ -328,7 +345,7 @@ fn grouping_thread_body(
                 group.add_snapshot(snapshot.clone(), filetree);
                 pb.inc(1);
                 trace!("(grouping-thread) added snapshot ({short_id})");
-                if group.count() == GROUP_SIZE {
+                if group.count() == group_size {
                     trace!("(grouping-thread) group is full, sending");
                     let start = Instant::now();
                     group_sender.send(group).unwrap();
