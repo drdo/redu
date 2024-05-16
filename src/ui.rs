@@ -315,7 +315,7 @@ impl WidgetRef for App {
             );
             let mut remaining_width = max(
                 0,
-                header_rect.width as isize - 4 - string.len() as isize
+                header_rect.width as isize - string.graphemes(true).count() as isize
             ) as usize;
             if remaining_width > 0 {
                 string.push(' ');
