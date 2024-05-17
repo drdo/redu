@@ -1,9 +1,10 @@
 use std::borrow::Cow;
 use std::iter;
-use std::cmp::{max, min};
+use std::cmp::max;
 use std::collections::HashSet;
 
 use camino::{Utf8Path, Utf8PathBuf};
+use log::trace;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Direction, Layout, Position, Rect, Size};
 use ratatui::prelude::Line;
@@ -260,16 +261,24 @@ impl ListEntry {
 
         // Bar
         spans.push(Span::raw({
-            let max_bar_width: usize = max(16, min(24, (0.1 * width as f64) as usize));
-            let bar_width = (self.relative_size * max_bar_width as f64) as usize;
-            let bar = format!(
-                " [{:#^bar_size$}{:empty_bar_size$}] ",
-                "", "",
-                bar_size = bar_width,
-                empty_bar_size = max_bar_width - bar_width
-            );
+            const MAX_BAR_WIDTH: usize = 16;
+            let bar_frac_width = (self.relative_size * (MAX_BAR_WIDTH*8) as f64) as usize;
+            let full_blocks = bar_frac_width / 8;
+            let last_block = match (bar_frac_width % 8) as u32 {
+                0 => String::new(),
+                x => String::from(unsafe { char::from_u32_unchecked(0x258F - x) }),
+            };
+            let empty_width = MAX_BAR_WIDTH
+                - full_blocks
+                - last_block.graphemes(true).count();
+            let mut bar = String::with_capacity(1+MAX_BAR_WIDTH+1);
+            bar.push(' ');
+            for _ in 0..full_blocks { bar.push('\u{2588}'); }
+            bar.push_str(&last_block);
+            for _ in 0..empty_width { bar.push(' '); }
+            bar.push(' ');
             bar
-        }));
+        }).green());
 
         // Name
         spans.push({
