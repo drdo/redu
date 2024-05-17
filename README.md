@@ -92,5 +92,5 @@ cargo test
 
 There are also a couple of benchmarks based on criterion that can be run with
 ```
-cargo bench --feature bench
+cargo bench --features bench
 ```
