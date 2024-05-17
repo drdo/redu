@@ -62,7 +62,7 @@ The marks are persistent across runs of redu (they are saved in the cache file),
 so feel free to mark a few files and just quit and come back later.
 
 ### Generating the excludes
-Press **g** to exit redu and generate a list will of your marks in alphabetic order to stdout.
+Press **g** to exit redu and generate a list with all of your marks in alphabetic order to stdout.
 
 Everything else that redu prints (including the UI itself) goes to stderr,
 so this allows you to redirect redu's output to a file to get an exclude-file
