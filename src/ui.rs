@@ -265,7 +265,7 @@ impl ListEntry {
             let full_blocks = bar_frac_width / 8;
             let last_block = match (bar_frac_width % 8) as u32 {
                 0 => String::new(),
-                x => String::from(unsafe { char::from_u32_unchecked(0x258F - x) }),
+                x => String::from(unsafe { char::from_u32_unchecked(0x2590 - x) }),
             };
             let empty_width = MAX_BAR_WIDTH
                 - full_blocks
@@ -282,7 +282,9 @@ impl ListEntry {
         // Name
         spans.push({
             let available_width = {
-                let used: usize = spans.iter().map(|s| s.content.len()).sum();
+                let used: usize = spans.iter()
+                    .map(|s| s.content.graphemes(true).count())
+                    .sum();
                 max(0, width as isize - used as isize) as usize
             };
             if self.is_dir
@@ -463,8 +465,8 @@ mod tests {
             Line::from(vec![
                 Span::raw(" "),
                 Span::raw(" 999.99 KiB"),
-                Span::raw(" [##############  ] "),
-                Span::raw("12...890")
+                Span::raw(" ██████████████▍  ").green(),
+                Span::raw("123...7890")
             ])
         );
     }
@@ -483,12 +485,12 @@ mod tests {
             Line::from(vec![
                 Span::raw(" "),
                 Span::raw(" 999.99 KiB"),
-                Span::raw(" [##############  ] "),
+                Span::raw(" ██████████████▍  ").green(),
                 Span::raw("1234567890123456789012345678901234567890")
             ])
         );
     }
-
+    
     #[test]
     fn list_entry_to_line_small_size_file() {
         let f = ListEntry {
@@ -503,12 +505,12 @@ mod tests {
             Line::from(vec![
                 Span::raw(" "),
                 Span::raw("      9 KiB"),
-                Span::raw(" [##############  ] "),
+                Span::raw(" ██████████████▍  ").green(),
                 Span::raw("1234567890123456789012345678901234567890")
             ])
         );
     }
-
+    
     #[test]
     fn list_entry_to_line_directory() {
         let f = ListEntry {
@@ -523,13 +525,13 @@ mod tests {
             Line::from(vec![
                 Span::raw(" "),
                 Span::raw("   9.99 KiB"),
-                Span::raw(" [##############  ] "),
+                Span::raw(" ██████████████▍  ").green(),
                 Span::raw("1234567890123456789012345678901234567890/")
                     .bold().blue()
             ])
         );
     }
-
+    
     #[test]
     fn list_entry_to_line_file_selected() {
         let f = ListEntry {
@@ -544,12 +546,12 @@ mod tests {
             Line::from(vec![
                 Span::raw(" "),
                 Span::raw(" 999.99 KiB"),
-                Span::raw(" [##############  ] "),
+                Span::raw(" ██████████████▍  ").green(),
                 Span::raw("1234567890123456789012345678901234567890")
             ]).black().on_white()
         );
     }
-
+    
     #[test]
     fn list_entry_to_line_directory_selected() {
         let f = ListEntry {
@@ -564,13 +566,13 @@ mod tests {
             Line::from(vec![
                 Span::raw(" "),
                 Span::raw("   9.99 KiB"),
-                Span::raw(" [##############  ] "),
+                Span::raw(" ██████████████▍  ").green(),
                 Span::raw("1234567890123456789012345678901234567890/")
                     .bold().dark_gray()
             ]).black().on_white()
         );
     }
-
+    
     #[test]
     fn list_entry_to_line_file_marked() {
         let f = ListEntry {
@@ -585,12 +587,12 @@ mod tests {
             Line::from(vec![
                 Span::raw("*"),
                 Span::raw(" 999.99 KiB"),
-                Span::raw(" [##############  ] "),
+                Span::raw(" ██████████████▍  ").green(),
                 Span::raw("1234567890123456789012345678901234567890")
             ])
         );
     }
-
+    
     #[test]
     fn list_entry_to_line_file_marked_selected() {
         let f = ListEntry {
@@ -605,7 +607,7 @@ mod tests {
             Line::from(vec![
                 Span::raw("*"),
                 Span::raw(" 999.99 KiB"),
-                Span::raw(" [##############  ] "),
+                Span::raw(" ██████████████▍  ").green(),
                 Span::raw("1234567890123456789012345678901234567890")
             ]).black().on_white()
         );
