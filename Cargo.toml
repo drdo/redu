@@ -33,7 +33,7 @@ unicode-segmentation = "*"
 path = "src/lib.rs"
 
 [[bin]]
-name = "dorestic"
+name = "redu"
 path = "src/main.rs"
 
 [features]
