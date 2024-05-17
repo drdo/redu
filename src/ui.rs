@@ -4,7 +4,6 @@ use std::cmp::max;
 use std::collections::HashSet;
 
 use camino::{Utf8Path, Utf8PathBuf};
-use log::trace;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Direction, Layout, Position, Rect, Size};
 use ratatui::prelude::Line;
