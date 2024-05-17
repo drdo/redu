@@ -93,13 +93,13 @@ pub struct Config {
 }
 
 pub struct Restic {
-    repo: String,
+    repo: Option<String>,
     password_command: Option<String>,
 }
 
 impl Restic {
     pub fn new(
-        repo: String,
+        repo: Option<String>,
         password_command: Option<String>,
     ) -> Self
     {
@@ -184,8 +184,10 @@ impl Restic {
         let mut cmd = Command::new("restic");
         // Need to detach process from terminal
         unsafe { cmd.pre_exec(|| { nix::unistd::setsid()?; Ok(()) }); }
-        cmd.arg("--repo").arg(&self.repo);
         for password_command in &self.password_command {
+        if let Some(repo) = &self.repo {
+            cmd.arg("--repo").arg(repo);
+        }
             cmd.arg("--password-command").arg(password_command);
         }
         cmd.arg("--json");

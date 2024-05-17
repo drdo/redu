@@ -69,7 +69,7 @@ mod ui;
 #[command(version, long_about, verbatim_doc_comment)]
 struct Cli {
     #[arg(short = 'r', long)]
-    repo: String,
+    repo: Option<String>,
     #[arg(long)]
     password_command: Option<String>,
     #[arg(
