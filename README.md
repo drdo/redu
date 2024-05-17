@@ -75,6 +75,8 @@ $ redu > exclude.txt
 $ restic rewrite --exclude-file=exclude.txt --forget
 ```
 
+Note: redu is strictly **read-only** and will never modify your repository itself.
+
 ### Quit
 You can also just quit without generating the list by pressing **q**.
 
