@@ -44,6 +44,10 @@ After some time you will see something like this:
 You can navigate using **hjkl** or the **arrow keys**.
 Going right enters a directory and going left leaves back to the parent.
 
+The size that redu shows for each item is the maximum size of the item
+across all snapshots. That is, it's the size of that item for the snapshot
+where it is the biggest.
+
 The bars indicate the relative size of the item compared to everything else
 in the current location.
 
