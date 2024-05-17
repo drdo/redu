@@ -65,8 +65,8 @@ impl From<ExitStatusError> for ErrorKind {
 #[derive(Debug, Error)]
 pub struct Error {
     #[source]
-    kind: ErrorKind,
-    stderr: Option<String>,
+    pub kind: ErrorKind,
+    pub stderr: Option<String>,
 }
 
 impl Display for Error {
