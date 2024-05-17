@@ -4,7 +4,7 @@ redu in a nutshell: it's ncdu for your restic repo.
 
 If you ever wanted to know what's taking so much space in your restic
 repo so that you can find all the caches and useless things you might be backing
-up and delete them from the snapshots then this is exactly for that.
+up and delete them from the snapshots, then this is exactly for you.
 
 ### Quick Start
 1. Install with cargo
