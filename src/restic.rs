@@ -184,10 +184,10 @@ impl Restic {
         let mut cmd = Command::new("restic");
         // Need to detach process from terminal
         unsafe { cmd.pre_exec(|| { nix::unistd::setsid()?; Ok(()) }); }
-        for password_command in &self.password_command {
         if let Some(repo) = &self.repo {
             cmd.arg("--repo").arg(repo);
         }
+        if let Some(password_command) = &self.password_command {
             cmd.arg("--password-command").arg(password_command);
         }
         cmd.arg("--json");
