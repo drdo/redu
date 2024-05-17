@@ -16,7 +16,7 @@ use crate::types::{File, Snapshot};
 
 #[derive(Debug, Error)]
 #[error("error launching restic process")]
-pub struct LaunchError(#[source] std::io::Error);
+pub struct LaunchError(#[source] pub std::io::Error);
 
 #[derive(Debug, Error)]
 pub enum RunError {
