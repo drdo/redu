@@ -137,7 +137,7 @@ impl Restic {
 
     // This is a trait object because of
     // https://github.com/rust-lang/rust/issues/125075
-    pub fn run_lazy_command<T, A>(
+    fn run_lazy_command<T, A>(
         &self,
         args: impl IntoIterator<Item=A>,
     ) -> Result<Box<dyn Iterator<Item=Result<(T, usize), Error>> + 'static>, LaunchError>
