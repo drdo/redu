@@ -23,7 +23,7 @@ $ export RESTIC_PASSWORD_COMMAND='security find-generic-password -s restic -a pe
 $ redu 
 ```
 
-Alternatively you can pass the repo and the password as arguments to redu:
+Alternatively, you can pass the repo and the password as arguments to redu:
 ```
 redu -r 'sftp://my-backup-server.my-domain.net' --password-command 'security find-generic-password -s restic -a personal -w' 
 ```
