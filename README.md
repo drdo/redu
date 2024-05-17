@@ -11,6 +11,7 @@ up and delete them from the snapshots, then this is exactly for you.
 ```
 cargo install redu
 ```
+Note: it currently requires nightly to build.
 2. Run
  
 You can use all the regular restic environment variables, they will be passed
