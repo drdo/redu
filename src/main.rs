@@ -55,6 +55,9 @@ mod ui;
 ///   This means that you can pipe redu directly to a file
 /// to get the exclude-file.
 ///
+/// NOTE: redu will never do any kind of modification to your repo.
+/// It's strictly read-only.
+/// 
 /// Keybinds:
 /// hjkl or arrows: movement
 /// m: mark
