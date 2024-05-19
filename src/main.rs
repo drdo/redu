@@ -268,19 +268,21 @@ fn sync_snapshots(
 ) -> anyhow::Result<()> {
     // Figure out what snapshots we need to fetch
     let missing_snapshots: Vec<Box<str>> = {
+        // Fetch snapshot list
         let pb = new_pb("Fetching repository snapshot list {spinner}");
         let repo_snapshots = restic.snapshots()?
             .into_iter()
             .map(|s| s.id)
             .collect::<Vec<Box<str>>>();
         pb.finish();
-        { // Delete snapshots from the DB that were deleted on the repo
-            let groups_to_delete = cache.get_snapshots()?
-                .into_iter()
-                .filter(|snapshot| ! repo_snapshots.contains(&snapshot))
-                .map(|snapshot_id| cache.get_snapshot_group(snapshot_id))
-                .collect::<Result<HashSet<u64>, rusqlite::Error>>()?;
-            
+ 
+       // Delete snapshots from the DB that were deleted on the repo
+        let groups_to_delete = cache.get_snapshots()?
+            .into_iter()
+            .filter(|snapshot| ! repo_snapshots.contains(&snapshot))
+            .map(|snapshot_id| cache.get_snapshot_group(snapshot_id))
+            .collect::<Result<HashSet<u64>, rusqlite::Error>>()?;
+        if groups_to_delete.len() > 0 {
             eprintln!("Need to delete {} groups", groups_to_delete.len());
             let pb = new_pb("{wide_bar} [{pos}/{len}] {spinner}");
             pb.set_length(groups_to_delete.len() as u64);
