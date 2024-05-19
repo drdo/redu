@@ -307,7 +307,7 @@ fn sync_snapshots(
     let missing_queue = Queue::new(missing_snapshots);
  
     // Create progress indicators
-    let pb = new_pb("{wide_bar} [{pos}/{len}] {msg}");
+    let pb = new_pb("{wide_bar} [{pos}/{len}] {msg} {spinner}");
     pb.set_length(total_missing_snapshots as u64);
     let speed = {
         let pb = pb.clone();
