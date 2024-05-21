@@ -6,6 +6,9 @@ If you ever wanted to know what's taking so much space in your restic
 repo so that you can find all the caches and useless things you might be backing
 up and delete them from the snapshots, then this is exactly for you.
 
+redu aggregates data from **all** snapshots into one view so you can easily find
+the culprits!
+
 # Installing
 
 You can either grab a pre-built binary from Github, currently available for:
