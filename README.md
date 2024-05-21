@@ -6,13 +6,20 @@ If you ever wanted to know what's taking so much space in your restic
 repo so that you can find all the caches and useless things you might be backing
 up and delete them from the snapshots, then this is exactly for you.
 
-### Quick Start
-1. Install with cargo
+# Installing
+
+You can either grab a pre-built binary from Github, currently available for:
+- Darwin (macos) arm64
+- Linux arm64
+- Linux amd64
+
+or you can install with cargo:
 ```
 cargo install redu
 ```
 Note: it currently requires nightly to build.
-2. Run
+ 
+# Running
  
 You can use all the regular restic environment variables, they will be passed
 to all restic subprocesses redu spawns.
