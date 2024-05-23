@@ -552,39 +552,45 @@ fn convert_event(event: crossterm::event::Event) -> Option<Event> {
     use crossterm::event::Event as TermEvent;
     use crossterm::event::KeyEventKind::{Press, Release};
     use ui::Event::*;
+
+    const KEYBINDINGS: &[((KeyModifiers, KeyCode), Event)] = &[
+        ((KeyModifiers::empty(), KeyCode::Left), Left),
+        ((KeyModifiers::empty(), KeyCode::Char('h')), Left),
+
+        ((KeyModifiers::empty(), KeyCode::Right), Right),
+        ((KeyModifiers::empty(), KeyCode::Char(';')), Right),
+
+        ((KeyModifiers::empty(), KeyCode::Up), Up),
+        ((KeyModifiers::empty(), KeyCode::Char('k')), Up),
+
+        ((KeyModifiers::empty(), KeyCode::Down), Down),
+        ((KeyModifiers::empty(), KeyCode::Char('j')), Down),
+
+        ((KeyModifiers::empty(), KeyCode::PageUp), PageUp),
+        ((KeyModifiers::CONTROL, KeyCode::Char('b')), PageUp),
+
+        ((KeyModifiers::empty(), KeyCode::PageDown), PageDown),
+        ((KeyModifiers::CONTROL, KeyCode::Char('f')), PageDown),
+ 
+        ((KeyModifiers::empty(), KeyCode::Char('m')), Mark),
+        ((KeyModifiers::empty(), KeyCode::Char('u')), Unmark),
+        ((KeyModifiers::empty(), KeyCode::Char('c')), UnmarkAll),
+        ((KeyModifiers::empty(), KeyCode::Char('q')), Quit),
+        ((KeyModifiers::empty(), KeyCode::Char('g')), Generate),
+    ];
     match event {
         TermEvent::Resize(w, h) =>
             Some(Resize(Size::new(w, h))),
         TermEvent::Key(event) if [Press, Release].contains(&event.kind) => {
-            match event.code {
-                KeyCode::Left => Some(Left),
-                KeyCode::Char('h') => Some(Left),
-
-                KeyCode::Right => Some(Right),
-                KeyCode::Char(';') => Some(Right),
-
-                KeyCode::Up => Some(Up),
-                KeyCode::Char('k') => Some(Up),
-
-                KeyCode::Down => Some(Down),
-                KeyCode::Char('j') => Some(Down),
-
-                KeyCode::PageUp => Some(PageUp),
-                KeyCode::Char('b') if event.modifiers == KeyModifiers::CONTROL =>
-                    Some(PageUp),
- 
-                KeyCode::PageDown => Some(PageDown),
-                KeyCode::Char('f') if event.modifiers == KeyModifiers::CONTROL =>
-                    Some(PageDown),
- 
-                KeyCode::Char('m') => Some(Mark),
-                KeyCode::Char('u') => Some(Unmark),
-                KeyCode::Char('c') => Some(UnmarkAll),
-                KeyCode::Char('q') => Some(Quit),
-                KeyCode::Char('g') => Some(Generate),
-
-                _ => None,
-            }
+            KEYBINDINGS
+                .iter()
+                .find_map(|((mods, code), ui_event)|
+                    if event.modifiers == *mods && event.code == *code {
+                        Some(ui_event.clone())
+                    } else {
+                        None
+                    }
+                )
         }
         _ => None,
     }

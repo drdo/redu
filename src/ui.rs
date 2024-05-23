@@ -14,7 +14,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use redu::types::{Directory, Entry, File};
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Event {
     Resize(Size),
     Left, Right,
