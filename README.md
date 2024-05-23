@@ -55,6 +55,8 @@ After some time you will see something like this:
 You can navigate using the **arrow keys** or **hjkl**.
 Going right enters a directory and going left leaves back to the parent.
 
+**PgUp**/**PgDown** or **C-b**/**C-b** scroll up or down a full page.
+
 The size that redu shows for each item is the maximum size of the item
 across all snapshots. That is, it's the size of that item for the snapshot
 where it is the biggest.
