@@ -59,12 +59,13 @@ mod ui;
 /// It's strictly read-only.
 /// 
 /// Keybinds:
-/// hjkl or arrows: movement
-/// m: mark
-/// u: unmark
-/// c: clear all marks
-/// g: generate
-/// q: quit
+/// Arrows or hjkl: Movement
+/// PgUp/PgDown or C-b/C-f: Page up / Page down
+/// m: Mark
+/// u: Unmark
+/// c: Clear all marks
+/// g: Generate
+/// q: Quit
 #[derive(Parser)]
 #[command(version, long_about, verbatim_doc_comment)]
 struct Cli {
