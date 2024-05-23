@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use camino::Utf8Path;
 use clap::{command, Parser};
-use crossterm::event::KeyCode;
+use crossterm::event::{KeyCode, KeyModifiers};
 use crossterm::ExecutableCommand;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use directories::ProjectDirs;
@@ -570,8 +570,12 @@ fn convert_event(event: crossterm::event::Event) -> Option<Event> {
                 KeyCode::Char('j') => Some(Down),
 
                 KeyCode::PageUp => Some(PageUp),
+                KeyCode::Char('b') if event.modifiers == KeyModifiers::CONTROL =>
+                    Some(PageUp),
  
                 KeyCode::PageDown => Some(PageDown),
+                KeyCode::Char('f') if event.modifiers == KeyModifiers::CONTROL =>
+                    Some(PageDown),
  
                 KeyCode::Char('m') => Some(Mark),
                 KeyCode::Char('u') => Some(Unmark),
