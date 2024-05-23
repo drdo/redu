@@ -50,9 +50,9 @@ It will be much faster the next time as it no longer needs to fetch the entire r
 
 After some time you will see something like this:
 
-![Screenshot of redu showing the contents of a repo with some marks active](screenshot.jpg)
+![Screenshot of redu showing the contents of a repo with some marks active](screenshot.png)
 
-You can navigate using **hjkl** or the **arrow keys**.
+You can navigate using the **arrow keys** or **hjkl**.
 Going right enters a directory and going left leaves back to the parent.
 
 The size that redu shows for each item is the maximum size of the item
