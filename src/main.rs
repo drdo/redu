@@ -569,6 +569,10 @@ fn convert_event(event: crossterm::event::Event) -> Option<Event> {
                 KeyCode::Down => Some(Down),
                 KeyCode::Char('j') => Some(Down),
 
+                KeyCode::PageUp => Some(PageUp),
+ 
+                KeyCode::PageDown => Some(PageDown),
+ 
                 KeyCode::Char('m') => Some(Mark),
                 KeyCode::Char('u') => Some(Unmark),
                 KeyCode::Char('c') => Some(UnmarkAll),
