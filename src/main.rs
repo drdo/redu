@@ -201,11 +201,11 @@ fn main() -> anyhow::Result<()> {
             cache.get_max_file_sizes(None::<&str>)?,
             cache.get_marks().unwrap(),
             vec![
-                "m".bold(), ": mark - ".into(),
-                "u".bold(), ": unmark - ".into(),
-                "c".bold(), ": clear all marks - ".into(),
-                "g".bold(), ": generate - ".into(),
-                "q".bold(), ": quit".into(),
+                "m".bold(), ":Mark  ".into(),
+                "u".bold(), ":Unmark  ".into(),
+                "c".bold(), ":ClearAllMarks  ".into(),
+                "g".bold(), ":Generate  ".into(),
+                "q".bold(), ":Quit".into(),
             ],
         )
     };
