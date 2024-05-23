@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use camino::Utf8Path;
 use clap::{command, Parser};
-use crossterm::event::KeyCode;
+use crossterm::event::{KeyCode, KeyModifiers};
 use crossterm::ExecutableCommand;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use directories::ProjectDirs;
@@ -59,12 +59,13 @@ mod ui;
 /// It's strictly read-only.
 /// 
 /// Keybinds:
-/// hjkl or arrows: movement
-/// m: mark
-/// u: unmark
-/// c: clear all marks
-/// g: generate
-/// q: quit
+/// Arrows or hjkl: Movement
+/// PgUp/PgDown or C-b/C-f: Page up / Page down
+/// m: Mark
+/// u: Unmark
+/// c: Clear all marks
+/// g: Generate
+/// q: Quit
 #[derive(Parser)]
 #[command(version, long_about, verbatim_doc_comment)]
 struct Cli {
@@ -200,11 +201,11 @@ fn main() -> anyhow::Result<()> {
             cache.get_max_file_sizes(None::<&str>)?,
             cache.get_marks().unwrap(),
             vec![
-                "m".bold(), ": mark - ".into(),
-                "u".bold(), ": unmark - ".into(),
-                "c".bold(), ": clear all marks - ".into(),
-                "g".bold(), ": generate - ".into(),
-                "q".bold(), ": quit".into(),
+                "m".bold(), ":Mark  ".into(),
+                "u".bold(), ":Unmark  ".into(),
+                "c".bold(), ":ClearAllMarks  ".into(),
+                "g".bold(), ":Generate  ".into(),
+                "q".bold(), ":Quit".into(),
             ],
         )
     };
@@ -552,31 +553,45 @@ fn convert_event(event: crossterm::event::Event) -> Option<Event> {
     use crossterm::event::Event as TermEvent;
     use crossterm::event::KeyEventKind::{Press, Release};
     use ui::Event::*;
+
+    const KEYBINDINGS: &[((KeyModifiers, KeyCode), Event)] = &[
+        ((KeyModifiers::empty(), KeyCode::Left), Left),
+        ((KeyModifiers::empty(), KeyCode::Char('h')), Left),
+
+        ((KeyModifiers::empty(), KeyCode::Right), Right),
+        ((KeyModifiers::empty(), KeyCode::Char(';')), Right),
+
+        ((KeyModifiers::empty(), KeyCode::Up), Up),
+        ((KeyModifiers::empty(), KeyCode::Char('k')), Up),
+
+        ((KeyModifiers::empty(), KeyCode::Down), Down),
+        ((KeyModifiers::empty(), KeyCode::Char('j')), Down),
+
+        ((KeyModifiers::empty(), KeyCode::PageUp), PageUp),
+        ((KeyModifiers::CONTROL, KeyCode::Char('b')), PageUp),
+
+        ((KeyModifiers::empty(), KeyCode::PageDown), PageDown),
+        ((KeyModifiers::CONTROL, KeyCode::Char('f')), PageDown),
+ 
+        ((KeyModifiers::empty(), KeyCode::Char('m')), Mark),
+        ((KeyModifiers::empty(), KeyCode::Char('u')), Unmark),
+        ((KeyModifiers::empty(), KeyCode::Char('c')), UnmarkAll),
+        ((KeyModifiers::empty(), KeyCode::Char('q')), Quit),
+        ((KeyModifiers::empty(), KeyCode::Char('g')), Generate),
+    ];
     match event {
         TermEvent::Resize(w, h) =>
             Some(Resize(Size::new(w, h))),
         TermEvent::Key(event) if [Press, Release].contains(&event.kind) => {
-            match event.code {
-                KeyCode::Left => Some(Left),
-                KeyCode::Char('h') => Some(Left),
-
-                KeyCode::Right => Some(Right),
-                KeyCode::Char(';') => Some(Right),
-
-                KeyCode::Up => Some(Up),
-                KeyCode::Char('k') => Some(Up),
-
-                KeyCode::Down => Some(Down),
-                KeyCode::Char('j') => Some(Down),
-
-                KeyCode::Char('m') => Some(Mark),
-                KeyCode::Char('u') => Some(Unmark),
-                KeyCode::Char('c') => Some(UnmarkAll),
-                KeyCode::Char('q') => Some(Quit),
-                KeyCode::Char('g') => Some(Generate),
-
-                _ => None,
-            }
+            KEYBINDINGS
+                .iter()
+                .find_map(|((mods, code), ui_event)|
+                    if event.modifiers == *mods && event.code == *code {
+                        Some(ui_event.clone())
+                    } else {
+                        None
+                    }
+                )
         }
         _ => None,
     }

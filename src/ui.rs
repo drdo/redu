@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::iter;
-use std::cmp::max;
+use std::cmp::{max, min};
 use std::collections::HashSet;
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -14,13 +14,12 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use redu::types::{Directory, Entry, File};
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Event {
     Resize(Size),
-    Left,
-    Right,
-    Up,
-    Down,
+    Left, Right,
+    Up, Down,
+    PageUp, PageDown,
     Mark,
     Unmark,
     UnmarkAll,
@@ -87,8 +86,12 @@ impl App {
             Resize(new_size) => self.resize(new_size),
             Left => self.left(),
             Right => self.right(),
-            Up => self.move_selection(-1),
-            Down => self.move_selection(1),
+            Up => self.move_selection(-1, true),
+            Down => self.move_selection(1, true),
+            PageUp =>
+                self.move_selection(-(self.list_size.height as isize), false),
+            PageDown =>
+                self.move_selection(self.list_size.height as isize, false),
             Mark => self.mark_selection(),
             Unmark => self.unmark_selection(),
             UnmarkAll => self.unmark_all(),
@@ -128,12 +131,17 @@ impl App {
         }
     }
 
-    fn move_selection(&mut self, delta: isize) -> Action {
+    fn move_selection(&mut self, delta: isize, wrap: bool) -> Action {
         if self.entries.is_empty() { return Action::Nothing }
 
         let selected = self.selected as isize;
         let len = self.entries.len() as isize;
-        self.selected = (selected + delta).rem_euclid(len) as usize;
+        self.selected =
+            if wrap {
+                (selected + delta).rem_euclid(len)
+            } else {
+                max(0, min(len-1, selected + delta))
+            } as usize;
         self.fix_offset();
 
         Action::Render
