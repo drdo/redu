@@ -80,10 +80,7 @@ impl Display for Error {
 
 impl From<LaunchError> for Error {
     fn from(value: LaunchError) -> Self {
-        Error {
-            kind: ErrorKind::Launch(value.into()),
-            stderr: None,
-        }
+        Error { kind: ErrorKind::Launch(value.into()), stderr: None }
     }
 }
 
@@ -98,11 +95,7 @@ pub struct Restic {
 }
 
 impl Restic {
-    pub fn new(
-        repo: Option<String>,
-        password_command: Option<String>,
-    ) -> Self
-    {
+    pub fn new(repo: Option<String>, password_command: Option<String>) -> Self {
         Restic { repo, password_command }
     }
 
@@ -117,8 +110,10 @@ impl Restic {
     pub fn ls(
         &self,
         snapshot: &str,
-    ) -> Result<impl Iterator<Item=Result<(File, usize), Error>> + 'static, LaunchError>
-    {
+    ) -> Result<
+        impl Iterator<Item = Result<(File, usize), Error>> + 'static,
+        LaunchError,
+    > {
         fn parse_file(mut v: Value) -> Option<File> {
             let mut m = std::mem::take(v.as_object_mut()?);
             Some(File {
@@ -127,23 +122,26 @@ impl Restic {
             })
         }
 
-        Ok(self.run_lazy_command(["ls", snapshot])?
-            .filter_map(|r| r
-                .map(|(value, bytes_read)|
-                     parse_file(value).map(|file| (file, bytes_read))
-                )
-                .transpose()))
+        Ok(self.run_lazy_command(["ls", snapshot])?.filter_map(|r| {
+            r.map(|(value, bytes_read)| {
+                parse_file(value).map(|file| (file, bytes_read))
+            })
+            .transpose()
+        }))
     }
 
     // This is a trait object because of
     // https://github.com/rust-lang/rust/issues/125075
     fn run_lazy_command<T, A>(
         &self,
-        args: impl IntoIterator<Item=A>,
-    ) -> Result<Box<dyn Iterator<Item=Result<(T, usize), Error>> + 'static>, LaunchError>
+        args: impl IntoIterator<Item = A>,
+    ) -> Result<
+        Box<dyn Iterator<Item = Result<(T, usize), Error>> + 'static>,
+        LaunchError,
+    >
     where
         T: DeserializeOwned + 'static,
-        A: AsRef<OsStr>
+        A: AsRef<OsStr>,
     {
         let child = self.run_command(args)?;
         Ok(Box::new(Iter::new(child)))
@@ -151,18 +149,17 @@ impl Restic {
 
     fn run_greedy_command<T, A>(
         &self,
-        args: impl IntoIterator<Item=A>,
+        args: impl IntoIterator<Item = A>,
     ) -> Result<T, Error>
     where
         T: DeserializeOwned,
         A: AsRef<OsStr>,
     {
         let child = self.run_command(args)?;
-        let output = child.wait_with_output()
-            .map_err(|e| Error {
-                kind: ErrorKind::Run(RunError::Io(e)),
-                stderr: None
-            })?;
+        let output = child.wait_with_output().map_err(|e| Error {
+            kind: ErrorKind::Run(RunError::Io(e)),
+            stderr: None,
+        })?;
         let r_value = try {
             output.status.exit_ok()?;
             serde_json::from_str(std::str::from_utf8(&output.stdout)?)?
@@ -170,7 +167,9 @@ impl Restic {
         match r_value {
             Err(kind) => Err(Error {
                 kind,
-                stderr: Some(String::from_utf8_lossy(&output.stderr).into_owned()),
+                stderr: Some(
+                    String::from_utf8_lossy(&output.stderr).into_owned(),
+                ),
             }),
             Ok(value) => Ok(value),
         }
@@ -178,12 +177,16 @@ impl Restic {
 
     fn run_command<A: AsRef<OsStr>>(
         &self,
-        args: impl IntoIterator<Item=A>,
-    ) -> Result<Child, LaunchError>
-    {
+        args: impl IntoIterator<Item = A>,
+    ) -> Result<Child, LaunchError> {
         let mut cmd = Command::new("restic");
         // Need to detach process from terminal
-        unsafe { cmd.pre_exec(|| { nix::unistd::setsid()?; Ok(()) }); }
+        unsafe {
+            cmd.pre_exec(|| {
+                nix::unistd::setsid()?;
+                Ok(())
+            });
+        }
         if let Some(repo) = &self.repo {
             cmd.arg("--repo").arg(repo);
         }
@@ -217,18 +220,14 @@ impl<T> Iter<T> {
         }
     }
 
-    fn read_stderr<U>(&mut self, kind: ErrorKind) -> Result<U, Error>
-    {
+    fn read_stderr<U>(&mut self, kind: ErrorKind) -> Result<U, Error> {
         let mut buf = String::new();
         match self.child.stderr.take().unwrap().read_to_string(&mut buf) {
             Err(e) => Err(Error {
                 kind: ErrorKind::Run(RunError::Io(e)),
                 stderr: None,
             }),
-            Ok(_) => Err(Error {
-                kind,
-                stderr: Some(buf),
-            })
+            Ok(_) => Err(Error { kind, stderr: Some(buf) }),
         }
     }
 }
@@ -249,11 +248,12 @@ impl<T: DeserializeOwned> Iterator for Iter<T> {
             })
         } else {
             match self.child.wait() {
-                Err(e) => Some(self.read_stderr(ErrorKind::Run(RunError::Io(e)))),
+                Err(e) =>
+                    Some(self.read_stderr(ErrorKind::Run(RunError::Io(e)))),
                 Ok(status) => match status.exit_ok() {
                     Err(e) => Some(self.read_stderr(e.into())),
                     Ok(()) => None,
-                }
+                },
             }
         }
     }

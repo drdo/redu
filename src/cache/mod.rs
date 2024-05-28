@@ -3,8 +3,8 @@ use std::path::Path;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use log::trace;
-use rusqlite::{Connection, params, Row};
 use rusqlite::functions::FunctionFlags;
+use rusqlite::{params, Connection, Row};
 
 use crate::cache::filetree::FileTree;
 use crate::types::{Directory, Entry, File};
@@ -17,9 +17,11 @@ pub fn is_corruption_error(error: &rusqlite::Error) -> bool {
         rusqlite::ErrorCode::NotADatabase,
     ];
     match error {
-        rusqlite::Error::SqliteFailure(rusqlite::ffi::Error { code, .. }, _) =>
-            CORRUPTION_CODES.contains(code),
-        _ => false
+        rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error { code, .. },
+            _,
+        ) => CORRUPTION_CODES.contains(code),
+        _ => false,
     }
 }
 
@@ -39,11 +41,9 @@ impl Cache {
                 | FunctionFlags::SQLITE_INNOCUOUS,
             |ctx| {
                 let path = Utf8Path::new(ctx.get_raw(0).as_str()?);
-                let parent = path
-                    .parent()
-                    .map(ToOwned::to_owned);
+                let parent = path.parent().map(ToOwned::to_owned);
                 Ok(parent.map(|p| p.to_string()))
-            }
+            },
         )?;
         conn.profile(Some(|stmt, duration| {
             trace!("SQL {stmt} (took {duration:#?})")
@@ -52,10 +52,7 @@ impl Cache {
         Ok(Cache { conn })
     }
 
-    pub fn get_snapshots(
-        &self,
-    ) -> Result<Vec<Box<str>>, rusqlite::Error>
-    {
+    pub fn get_snapshots(&self) -> Result<Vec<Box<str>>, rusqlite::Error> {
         self.conn
             .prepare("SELECT id FROM snapshots")?
             .query_map([], |row| row.get("id"))?
@@ -68,15 +65,17 @@ impl Cache {
     pub fn get_max_file_sizes(
         &self,
         path: Option<impl AsRef<Utf8Path>>,
-    ) -> Result<Vec<Entry>, rusqlite::Error>
-    {
+    ) -> Result<Vec<Entry>, rusqlite::Error> {
         let aux = |row: &Row| {
             let child_path = {
-                let child_path: Utf8PathBuf = row.get::<&str, String>("path")?.into();
+                let child_path: Utf8PathBuf =
+                    row.get::<&str, String>("path")?.into();
                 path.as_ref()
                     .map(AsRef::as_ref)
                     .clone()
-                    .map(|p| child_path.strip_prefix(p.as_std_path()).unwrap().into())
+                    .map(|p| {
+                        child_path.strip_prefix(p.as_std_path()).unwrap().into()
+                    })
                     .unwrap_or(child_path)
             };
             let size = row.get("size")?;
@@ -129,24 +128,31 @@ impl Cache {
     pub fn save_snapshot_group(
         &mut self,
         group: SnapshotGroup,
-    ) -> Result<(), rusqlite::Error>
-    {
+    ) -> Result<(), rusqlite::Error> {
         let tx = self.conn.transaction()?;
         {
-            let group_id: u64 = tx.query_row_and_then(
-                r#"SELECT max("group")+1 FROM snapshots"#,
-                [],
-                |row| row.get::<usize, Option<u64>>(0))?
+            let group_id: u64 = tx
+                .query_row_and_then(
+                    r#"SELECT max("group")+1 FROM snapshots"#,
+                    [],
+                    |row| row.get::<usize, Option<u64>>(0),
+                )?
                 .unwrap_or(0);
-            let mut snapshot_stmt = tx.prepare(r#"
+            let mut snapshot_stmt = tx.prepare(
+                r#"
                 INSERT INTO snapshots (id, "group")
-                VALUES (?, ?)"#)?;
-            let mut file_stmt = tx.prepare("
+                VALUES (?, ?)"#,
+            )?;
+            let mut file_stmt = tx.prepare(
+                "
                 INSERT INTO files (snapshot_group, path, size)
-                VALUES (?, ?, ?)")?;
-            let mut dir_stmt = tx.prepare("\
+                VALUES (?, ?, ?)",
+            )?;
+            let mut dir_stmt = tx.prepare(
+                "\
                 INSERT INTO directories (snapshot_group, path, size)
-                VALUES (?, ?, ?)")?;
+                VALUES (?, ?, ?)",
+            )?;
 
             for id in group.snapshots.iter() {
                 snapshot_stmt.execute(params![id, group_id])?;
@@ -154,12 +160,10 @@ impl Cache {
 
             for entry in group.filetree.take().iter() {
                 match entry {
-                    Entry::File(File{ path, size}) =>
-                        file_stmt.execute(
-                            params![group_id, path.into_string(), size])?,
-                    Entry::Directory(Directory{ path, size}) =>
-                        dir_stmt.execute(
-                            params![group_id, path.into_string(), size])?,
+                    Entry::File(File { path, size }) => file_stmt
+                        .execute(params![group_id, path.into_string(), size])?,
+                    Entry::Directory(Directory { path, size }) => dir_stmt
+                        .execute(params![group_id, path.into_string(), size])?,
                 };
             }
         }
@@ -169,12 +173,11 @@ impl Cache {
     pub fn get_snapshot_group(
         &self,
         id: impl AsRef<str>,
-    ) -> Result<u64, rusqlite::Error>
-    {
+    ) -> Result<u64, rusqlite::Error> {
         self.conn.query_row_and_then(
             r#"SELECT "group" FROM snapshots WHERE id = ?"#,
             [id.as_ref()],
-            |row| row.get(0)
+            |row| row.get(0),
         )
     }
 
@@ -182,10 +185,12 @@ impl Cache {
         let tx = self.conn.transaction()?;
         tx.execute(r#"DELETE FROM snapshots WHERE "group" = ?"#, [id])?;
         tx.execute(r#"DELETE FROM files WHERE snapshot_group = ?"#, [id])?;
-        tx.execute(r#"DELETE FROM directories WHERE snapshot_group = ?"#, [id])?;
+        tx.execute(r#"DELETE FROM directories WHERE snapshot_group = ?"#, [
+            id,
+        ])?;
         tx.commit()
     }
- 
+
     // Marks ////////////////////////////////////////////////
     pub fn get_marks(&self) -> Result<Vec<Utf8PathBuf>, rusqlite::Error> {
         let mut stmt = self.conn.prepare("SELECT path FROM marks")?;
@@ -195,19 +200,22 @@ impl Cache {
         result
     }
 
-    pub fn upsert_mark(&mut self, path: &Utf8Path) -> Result<usize, rusqlite::Error> {
+    pub fn upsert_mark(
+        &mut self,
+        path: &Utf8Path,
+    ) -> Result<usize, rusqlite::Error> {
         self.conn.execute(
             "INSERT INTO marks (path) VALUES (?) \
              ON CONFLICT (path) DO NOTHING",
-            [path.as_str()]
+            [path.as_str()],
         )
     }
 
-    pub fn delete_mark(&mut self, path: &Utf8Path) -> Result<usize, rusqlite::Error> {
-        self.conn.execute(
-            "DELETE FROM marks WHERE path = ?",
-            [path.as_str()]
-        )
+    pub fn delete_mark(
+        &mut self,
+        path: &Utf8Path,
+    ) -> Result<usize, rusqlite::Error> {
+        self.conn.execute("DELETE FROM marks WHERE path = ?", [path.as_str()])
     }
 
     pub fn delete_all_marks(&mut self) -> Result<usize, rusqlite::Error> {
@@ -232,7 +240,7 @@ impl SnapshotGroup {
         self.snapshots.push(id);
         self.filetree.replace(self.filetree.take().merge(filetree));
     }
-    
+
     pub fn count(&self) -> usize {
         self.snapshots.len()
     }
@@ -266,18 +274,21 @@ pub mod tests {
                 if child < self.branching_factor {
                     let mut new_prefix = prefix.clone();
                     new_prefix.push(Utf8PathBuf::from(child.to_string()));
-                    self.state.push((depth, prefix, child+1));
+                    self.state.push((depth, prefix, child + 1));
                     if depth == 1 {
-                        break(Some(new_prefix));
+                        break (Some(new_prefix));
                     } else {
-                        self.state.push((depth-1, new_prefix, 0));
+                        self.state.push((depth - 1, new_prefix, 0));
                     }
                 }
             }
         }
     }
 
-    pub fn generate_filetree(depth: usize, branching_factor: usize) -> FileTree {
+    pub fn generate_filetree(
+        depth: usize,
+        branching_factor: usize,
+    ) -> FileTree {
         let mut filetree = FileTree::new();
         for path in PathGenerator::new(depth, branching_factor) {
             filetree.insert(&path, 1).unwrap();

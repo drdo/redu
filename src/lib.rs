@@ -2,6 +2,6 @@
 #![feature(try_blocks)]
 #![feature(iter_intersperse)]
 
+pub mod cache;
 pub mod restic;
 pub mod types;
-pub mod cache;

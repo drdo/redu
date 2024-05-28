@@ -16,18 +16,14 @@ pub struct EntryExistsError;
 
 impl FileTree {
     pub fn new() -> FileTree {
-        FileTree {
-            size: 0,
-            children: HashMap::new(),
-        }
+        FileTree { size: 0, children: HashMap::new() }
     }
 
     pub fn insert(
         &mut self,
         path: &Utf8Path,
         size: usize,
-    ) -> Result<(), EntryExistsError>
-    {
+    ) -> Result<(), EntryExistsError> {
         let (mut breadcrumbs, remaining) = {
             let (breadcrumbs, remaining) = self.find(path);
             (breadcrumbs, remaining.map(Ok).unwrap_or(Err(EntryExistsError))?)
@@ -38,7 +34,8 @@ impl FileTree {
         }
         let mut current = unsafe { &mut **breadcrumbs.last().unwrap() };
         for c in remaining.iter() {
-            current = current.children.entry(Box::from(c)).or_insert(FileTree::new());
+            current =
+                current.children.entry(Box::from(c)).or_insert(FileTree::new());
             current.size = size;
         }
         Ok(())
@@ -46,8 +43,10 @@ impl FileTree {
 
     pub fn merge(self, other: FileTree) -> Self {
         fn sorted_children(filetree: FileTree) -> Vec<(Box<str>, FileTree)> {
-            let mut children = filetree.children.into_iter().collect::<Vec<_>>();
-            children.sort_unstable_by(|(name0, _), (name1, _)| name0.cmp(name1));
+            let mut children =
+                filetree.children.into_iter().collect::<Vec<_>>();
+            children
+                .sort_unstable_by(|(name0, _), (name1, _)| name0.cmp(name1));
             children
         }
 
@@ -65,21 +64,27 @@ impl FileTree {
                         children.insert(name1, tree1);
                     }
                 }
-                (None, Some((name, tree))) => { children.insert(name, tree); }
-                (Some((name, tree)), None) => { children.insert(name, tree); }
-                (None, None) => { break; }
+                (None, Some((name, tree))) => {
+                    children.insert(name, tree);
+                }
+                (Some((name, tree)), None) => {
+                    children.insert(name, tree);
+                }
+                (None, None) => {
+                    break;
+                }
             }
         }
         FileTree { size, children }
     }
- 
+
     pub fn iter(&self) -> Iter {
         Iter {
             stack: vec![Breadcrumb {
                 path: None,
                 size: self.size,
                 children: self.children.iter(),
-            }]
+            }],
         }
     }
 
@@ -90,8 +95,7 @@ impl FileTree {
     fn find(
         &mut self,
         path: &Utf8Path,
-    ) -> (Vec<*mut FileTree>, Option<Utf8PathBuf>)
-    {
+    ) -> (Vec<*mut FileTree>, Option<Utf8PathBuf>) {
         let mut breadcrumbs: Vec<*mut FileTree> = vec![self];
         let mut prefix = Utf8PathBuf::new();
         for c in path.iter() {
@@ -106,8 +110,11 @@ impl FileTree {
         }
         let remaining_path = {
             let suffix = path.strip_prefix(prefix).unwrap();
-            if suffix.as_str().is_empty() { None }
-            else { Some(suffix.to_path_buf()) }
+            if suffix.as_str().is_empty() {
+                None
+            } else {
+                Some(suffix.to_path_buf())
+            }
         };
         (breadcrumbs, remaining_path)
     }
@@ -139,31 +146,33 @@ impl<'a> Iterator for Iter<'a> {
         loop {
             match self.stack.pop() {
                 None => break None,
-                Some(mut breadcrumb) => {
-                    match breadcrumb.children.next() {
-                        None =>
-                            break breadcrumb.path.map(|p| {
-                                let dir = Directory{ path: p, size: breadcrumb.size };
-                                Entry::Directory(dir)
-                            }),
-                        Some((name, tree)) => {
-                            let new_path = breadcrumb.path_extend(name);
-                            self.stack.push(breadcrumb);
-                            if tree.children.is_empty() {
-                                break Some(Entry::File(File { path: new_path, size: tree.size }))
-                            } else {
-                                let new_breadcrumb = {
-                                    Breadcrumb {
-                                        path: Some(new_path),
-                                        size: tree.size,
-                                        children: tree.children.iter(),
-                                    }
-                                };
-                                self.stack.push(new_breadcrumb);
-                            }
+                Some(mut breadcrumb) => match breadcrumb.children.next() {
+                    None =>
+                        break breadcrumb.path.map(|p| {
+                            let dir =
+                                Directory { path: p, size: breadcrumb.size };
+                            Entry::Directory(dir)
+                        }),
+                    Some((name, tree)) => {
+                        let new_path = breadcrumb.path_extend(name);
+                        self.stack.push(breadcrumb);
+                        if tree.children.is_empty() {
+                            break Some(Entry::File(File {
+                                path: new_path,
+                                size: tree.size,
+                            }));
+                        } else {
+                            let new_breadcrumb = {
+                                Breadcrumb {
+                                    path: Some(new_path),
+                                    size: tree.size,
+                                    children: tree.children.iter(),
+                                }
+                            };
+                            self.stack.push(new_breadcrumb);
                         }
                     }
-                }
+                },
             }
         }
     }
@@ -207,7 +216,7 @@ mod tests {
         assert_eq!(filetree.insert("a/1/x/1".into(), 1), Ok(()));
         filetree
     }
- 
+
     #[test]
     fn insert_uniques_0() {
         let mut entries = example_tree_0().iter().collect::<Vec<_>>();
@@ -245,7 +254,7 @@ mod tests {
             Entry::File(File { path: "a/2/x/0".into(), size: 7 }),
         ]);
     }
- 
+
     #[test]
     fn insert_existing() {
         let mut filetree = example_tree_0();
@@ -253,7 +262,7 @@ mod tests {
         assert_eq!(filetree.insert("a/0".into(), 1), Err(EntryExistsError));
         assert_eq!(filetree.insert("a/0/z/0".into(), 1), Err(EntryExistsError));
     }
-    
+
     #[test]
     fn merge_test() {
         let filetree = example_tree_0().merge(example_tree_1());
@@ -275,7 +284,7 @@ mod tests {
             Entry::File(File { path: "a/2/x/0".into(), size: 7 }),
         ]);
     }
- 
+
     #[test]
     fn merge_reflexivity() {
         assert_eq!(example_tree_0().merge(example_tree_0()), example_tree_0());
@@ -284,13 +293,17 @@ mod tests {
 
     #[test]
     fn merge_associativity() {
-        assert_eq!(example_tree_0().merge(example_tree_1()).merge(example_tree_2()),
-                   example_tree_0().merge(example_tree_1().merge(example_tree_2())));
+        assert_eq!(
+            example_tree_0().merge(example_tree_1()).merge(example_tree_2()),
+            example_tree_0().merge(example_tree_1().merge(example_tree_2()))
+        );
     }
- 
+
     #[test]
     fn merge_commutativity() {
-        assert_eq!(example_tree_0().merge(example_tree_1()),
-                   example_tree_1().merge(example_tree_0()));
+        assert_eq!(
+            example_tree_0().merge(example_tree_1()),
+            example_tree_1().merge(example_tree_0())
+        );
     }
 }
