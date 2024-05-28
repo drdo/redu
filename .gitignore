@@ -1,3 +1,4 @@
-/target
-/scripts/target
+.DS_Store
 .idea
+/scripts/target
+/target
