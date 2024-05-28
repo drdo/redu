@@ -9,7 +9,9 @@ use ratatui::layout::{Constraint, Direction, Layout, Position, Rect, Size};
 use ratatui::prelude::Line;
 use ratatui::style::{Style, Stylize};
 use ratatui::text::Span;
-use ratatui::widgets::{List, ListItem, Paragraph, WidgetRef};
+use ratatui::widgets::{
+    Block, Clear, List, ListItem, Paragraph, Widget, WidgetRef, Wrap,
+};
 use redu::types::{Directory, Entry, File};
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -22,6 +24,7 @@ pub enum Event {
     Down,
     PageUp,
     PageDown,
+    Enter,
     Mark,
     Unmark,
     UnmarkAll,
@@ -55,6 +58,7 @@ pub struct App {
     selected: usize,
     offset: usize,
     footer_extra: Vec<Span<'static>>,
+    confirm_dialog: Option<ConfirmDialog>,
 }
 
 impl App {
@@ -78,6 +82,7 @@ impl App {
             selected: 0,
             offset: 0,
             footer_extra,
+            confirm_dialog: None,
         }
     }
 
@@ -86,17 +91,52 @@ impl App {
         use Event::*;
         match event {
             Resize(new_size) => self.resize(new_size),
-            Left => self.left(),
-            Right => self.right(),
+            Left =>
+                if let Some(ref mut confirm_dialog) = self.confirm_dialog {
+                    confirm_dialog.yes_selected = false;
+                    Action::Render
+                } else {
+                    self.left()
+                },
+            Right =>
+                if let Some(ref mut confirm_dialog) = self.confirm_dialog {
+                    confirm_dialog.yes_selected = true;
+                    Action::Render
+                } else {
+                    self.right()
+                },
             Up => self.move_selection(-1, true),
             Down => self.move_selection(1, true),
             PageUp =>
                 self.move_selection(-(self.list_size.height as isize), false),
             PageDown =>
                 self.move_selection(self.list_size.height as isize, false),
+            Enter =>
+                if let Some(confirm_dialog) = self.confirm_dialog.take() {
+                    if confirm_dialog.yes_selected {
+                        confirm_dialog.action
+                    } else {
+                        Action::Render
+                    }
+                } else {
+                    Action::Nothing
+                },
             Mark => self.mark_selection(),
             Unmark => self.unmark_selection(),
-            UnmarkAll => self.unmark_all(),
+            UnmarkAll =>
+                if self.confirm_dialog.is_none() {
+                    self.confirm_dialog = Some(ConfirmDialog {
+                        text: "Are you sure you want to delete all marks?"
+                            .into(),
+                        yes: "Yes".into(),
+                        no: "No".into(),
+                        yes_selected: false,
+                        action: Action::DeleteAllMarks,
+                    });
+                    Action::Render
+                } else {
+                    Action::Nothing
+                },
             Quit => Action::Quit,
             Generate => self.generate(),
             Entries { parent, children } => self.set_entries(parent, children),
@@ -155,10 +195,6 @@ impl App {
 
     fn unmark_selection(&mut self) -> Action {
         self.selected_entry().map(Action::DeleteMark).unwrap_or(Action::Nothing)
-    }
-
-    fn unmark_all(&self) -> Action {
-        Action::DeleteAllMarks
     }
 
     fn generate(&self) -> Action {
@@ -236,6 +272,54 @@ fn path_extended<'a>(
             full_path.push(more);
             Cow::Owned(full_path)
         }
+    }
+}
+
+/// ConfirmDialog //////////////////////////////////////////////////////////////
+struct ConfirmDialog {
+    text: String,
+    yes: String,
+    no: String,
+    yes_selected: bool,
+    action: Action,
+}
+
+impl WidgetRef for ConfirmDialog {
+    fn render_ref(&self, area: Rect, buf: &mut Buffer) {
+        let block = Block::bordered().title("Confirm");
+        let (main_text_area, buttons_area) = {
+            let layout = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Fill(100), Constraint::Length(3)])
+                .split(block.inner(area));
+            (layout[0], layout[1])
+        };
+        let (no_button_area, yes_button_area) = {
+            let layout = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Fill(50), Constraint::Fill(50)])
+                .split(buttons_area);
+            (layout[0], layout[1])
+        };
+
+        fn button(label: &String, selected: bool) -> impl Widget {
+            let mut button = Paragraph::new(label.clone())
+                .block(Block::bordered())
+                .centered()
+                .wrap(Wrap { trim: false });
+            if selected {
+                button = button.black().on_white();
+            }
+            button
+        }
+
+        block.render(area, buf);
+        Paragraph::new(self.text.clone())
+            .centered()
+            .wrap(Wrap { trim: false })
+            .render(main_text_area, buf);
+        button(&self.no, !self.yes_selected).render(no_button_area, buf);
+        button(&self.yes, self.yes_selected).render(yes_button_area, buf);
     }
 }
 
@@ -391,6 +475,16 @@ impl WidgetRef for App {
             Paragraph::new(Line::from(spans))
                 .on_light_blue()
                 .render_ref(footer_rect, buf);
+        }
+
+        if let Some(confirm_dialog) = &self.confirm_dialog {
+            let width = area.width / 2;
+            let height = area.height / 2;
+            let x = (area.width - width) / 2;
+            let y = (area.height - height) / 2;
+            let confirm_dialog_area = Rect::new(x, y, width, height);
+            Clear.render(confirm_dialog_area, buf);
+            confirm_dialog.render_ref(confirm_dialog_area, buf);
         }
     }
 }
