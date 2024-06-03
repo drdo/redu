@@ -10,7 +10,8 @@ use ratatui::prelude::Line;
 use ratatui::style::{Style, Stylize};
 use ratatui::text::Span;
 use ratatui::widgets::{
-    Block, Clear, List, ListItem, Paragraph, Widget, WidgetRef, Wrap,
+    Block, BorderType, Clear, List, ListItem, Paragraph, Widget, WidgetRef,
+    Wrap,
 };
 use redu::types::{Directory, Entry, File};
 use unicode_segmentation::UnicodeSegmentation;
@@ -297,20 +298,33 @@ impl WidgetRef for ConfirmDialog {
         let (no_button_area, yes_button_area) = {
             let layout = Layout::default()
                 .direction(Direction::Horizontal)
-                .constraints([Constraint::Fill(50), Constraint::Fill(50)])
+                .constraints([
+                    Constraint::Fill(1),
+                    Constraint::Min(self.no.graphemes(true).count() as u16),
+                    Constraint::Fill(1),
+                    Constraint::Min(self.yes.graphemes(true).count() as u16),
+                    Constraint::Fill(1),
+                ])
                 .split(buttons_area);
-            (layout[0], layout[1])
+            (layout[1], layout[3])
         };
 
-        fn button(label: &String, selected: bool) -> impl Widget {
-            let mut button = Paragraph::new(label.clone())
-                .block(Block::bordered())
+        fn render_button(
+            label: &String,
+            selected: bool,
+            area: Rect,
+            buf: &mut Buffer,
+        ) {
+            let block = if selected {
+                Block::bordered().border_type(BorderType::QuadrantOutside)
+            } else {
+                Block::bordered().border_type(BorderType::Plain)
+            };
+            let button = Paragraph::new(label.clone())
                 .centered()
                 .wrap(Wrap { trim: false });
-            if selected {
-                button = button.black().on_white();
-            }
-            button
+            button.render(block.inner(area), buf);
+            block.render(area, buf);
         }
 
         block.render(area, buf);
@@ -318,8 +332,8 @@ impl WidgetRef for ConfirmDialog {
             .centered()
             .wrap(Wrap { trim: false })
             .render(main_text_area, buf);
-        button(&self.no, !self.yes_selected).render(no_button_area, buf);
-        button(&self.yes, self.yes_selected).render(yes_button_area, buf);
+        render_button(&self.no, !self.yes_selected, no_button_area, buf);
+        render_button(&self.yes, self.yes_selected, yes_button_area, buf);
     }
 }
 
