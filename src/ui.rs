@@ -25,6 +25,7 @@ pub enum Event {
     PageUp,
     PageDown,
     Enter,
+    Exit,
     Mark,
     Unmark,
     UnmarkAll,
@@ -118,6 +119,12 @@ impl App {
                     } else {
                         Action::Render
                     }
+                } else {
+                    Action::Nothing
+                },
+            Exit =>
+                if self.confirm_dialog.take().is_some() {
+                    Action::Render
                 } else {
                     Action::Nothing
                 },
