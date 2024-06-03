@@ -10,7 +10,8 @@ use ratatui::prelude::Line;
 use ratatui::style::{Style, Stylize};
 use ratatui::text::Span;
 use ratatui::widgets::{
-    Block, BorderType, Clear, List, ListItem, Padding, Paragraph, Widget, WidgetRef, Wrap
+    Block, BorderType, Clear, List, ListItem, Padding, Paragraph, Widget,
+    WidgetRef, Wrap,
 };
 use redu::types::{Directory, Entry, File};
 use unicode_segmentation::UnicodeSegmentation;
@@ -302,19 +303,15 @@ impl WidgetRef for ConfirmDialog {
         let vert_padding = padding.top + padding.bottom;
         let dialog_area = {
             let max_text_width = min(80, area.width - 2 - horiz_padding); // take out the border and padding
-            let text_width = min(
-                self.text.graphemes(true).count() as u16,
-                max_text_width,
-            );
+            let text_width =
+                min(self.text.graphemes(true).count() as u16, max_text_width);
             let text_height = main_text.line_count(max_text_width) as u16;
             let max_width = text_width + 2 + horiz_padding; // text + border + padding
-            let max_height = text_height + 2 + vert_padding + 1 + 2+1; // text + border + padding + empty line + buttons
+            let max_height = text_height + 2 + vert_padding + 1 + 2 + 1; // text + border + padding + empty line + buttons
             centered(max_width, max_height, area)
         };
 
-        let block = Block::bordered()
-            .title("Confirm")
-            .padding(padding);
+        let block = Block::bordered().title("Confirm").padding(padding);
 
         let (main_text_area, buttons_area) = {
             let layout = Layout::default()
@@ -354,7 +351,7 @@ impl WidgetRef for ConfirmDialog {
             button.render(block.inner(area), buf);
             block.render(area, buf);
         }
- 
+
         Clear.render(dialog_area, buf);
         block.render(dialog_area, buf);
         main_text.render(main_text_area, buf);
@@ -598,8 +595,8 @@ fn centered(max_width: u16, max_height: u16, area: Rect) -> Rect {
     let width = min(max_width, area.width);
     let height = min(max_height, area.height);
     Rect {
-        x: area.width/2 - width/2,
-        y: area.height/2 - height/2,
+        x: area.width / 2 - width / 2,
+        y: area.height / 2 - height / 2,
         width,
         height,
     }
