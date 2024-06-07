@@ -1,6 +1,6 @@
 [package]
 name = "redu"
-version = "0.1.3"
+version = "0.1.4"
 authors = ["Daniel Rebelo de Oliveira <drdo@drdo.eu>"]
 license = "MIT"
 homepage = "https://github.com/drdo/redu"
@@ -14,7 +14,7 @@ description = "This is like ncdu for a restic repository."
 anyhow = "1"
 scopeguard = "1"
 camino = "1"
-clap = { version = "=4.5.0", features = ["derive"] } # Fixing this to not pull in "heck" twice
+clap = { version = "4", features = ["derive"] }
 crossterm = "0.27"
 directories = "5"
 flexi_logger = "0.28"
