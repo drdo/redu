@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  set-env:
+    runs-on: ubuntu-24.04
+    outputs:
+      name: ${{steps.vars.outputs.name}}
+      version: ${{steps.vars.outputs.version}}
+    steps:
+      - uses: actions/checkout@v4
+      - id: vars
+        run: |
+          set -e -o pipefail
+          echo "NAME=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name')" >> "$GITHUB_OUTPUT"
+          echo "VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].version')" >> "$GITHUB_OUTPUT"
+  build-linux-x86_64:
+    needs: set-env
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v4
+    - name: Rustfmt Check
+      run: cargo fmt --check
+    - name: Add x86_64-unknown-linux-musl target
+      run: |
+        rustup target add x86_64-unknown-linux-musl
+        sudo apt-get -y update
+        sudo apt-get -y install musl-dev musl-tools
+    - name: Build
+      run: cargo build --target=x86_64-unknown-linux-musl --release --verbose
+    - name: Run tests
+      run: cargo test --verbose
+    - name: Compress
+      run: >
+        cat "target/x86_64-unknown-linux-musl/release/${{needs.set-env.outputs.name}}"
+        | bzip2 -9 -c > ${{needs.set-env.outputs.name}}-${{needs.set-env.outputs.version}}-linux-x86_64.bz2
+    - name: Upload
+      uses: diamondburned/action-upload-release@v0.0.1
+      with:
+        files: ${{needs.set-env.outputs.name}}-${{needs.set-env.outputs.version}}-linux-x86_64.bz2
+  build-linux-arm64:
+    needs: set-env
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install cross
+      run: cargo install cross
+    - name: Build
+      run: cross build --target aarch64-unknown-linux-musl --release --verbose
+    - name: Compress
+      run: >
+        cat "target/aarch64-unknown-linux-musl/release/${{needs.set-env.outputs.name}}"
+        | bzip2 -9 -c > ${{needs.set-env.outputs.name}}-${{needs.set-env.outputs.version}}-linux-arm64.bz2
+    - name: Upload
+      uses: diamondburned/action-upload-release@v0.0.1
+      with:
+        files: ${{needs.set-env.outputs.name}}-${{needs.set-env.outputs.version}}-linux-arm64.bz2
+  build-darwin-x86_64:
+    needs: set-env
+    runs-on: macos-13
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build
+      run: cargo build --release --verbose
+    - name: Compress
+      run: >
+        cat "target/release/${{needs.set-env.outputs.name}}"
+        | bzip2 -9 -c > ${{needs.set-env.outputs.name}}-${{needs.set-env.outputs.version}}-darwin-x86_64.bz2
+    - name: Upload
+      uses: diamondburned/action-upload-release@v0.0.1
+      with:
+        files: ${{needs.set-env.outputs.name}}-${{needs.set-env.outputs.version}}-darwin-x86_64.bz2
+  build-darwin-arm64:
+    needs: set-env
+    runs-on: macos-14
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build
+      run: cargo build --release --verbose
+    - name: Compress
+      run: >
+        cat "target/release/${{needs.set-env.outputs.name}}"
+        | bzip2 -9 -c > ${{needs.set-env.outputs.name}}-${{needs.set-env.outputs.version}}-darwin-arm64.bz2
+    - name: Upload
+      uses: diamondburned/action-upload-release@v0.0.1
+      with:
+        files: ${{needs.set-env.outputs.name}}-${{needs.set-env.outputs.version}}-darwin-arm64.bz2
