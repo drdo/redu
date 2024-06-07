@@ -20,7 +20,7 @@ jobs:
           set -e -o pipefail
           echo "NAME=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name')" >> "$GITHUB_OUTPUT"
           echo "VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].version')" >> "$GITHUB_OUTPUT"
-  build-linux-amd64:
+  build-linux-x86_64:
     needs: set-env
     runs-on: ubuntu-24.04
     steps:
@@ -39,11 +39,11 @@ jobs:
     - name: Compress
       run: >
         cat "target/x86_64-unknown-linux-musl/release/${{needs.set-env.outputs.name}}"
-        | bzip2 -9 -c > ${{needs.set-env.outputs.name}}-${{needs.set-env.outputs.version}}-linux-amd64.bz2
+        | bzip2 -9 -c > ${{needs.set-env.outputs.name}}-${{needs.set-env.outputs.version}}-linux-x86_64.bz2
     - name: Upload
       uses: diamondburned/action-upload-release@v0.0.1
       with:
-        files: ${{needs.set-env.outputs.name}}-${{needs.set-env.outputs.version}}-linux-amd64.bz2
+        files: ${{needs.set-env.outputs.name}}-${{needs.set-env.outputs.version}}-linux-x86_64.bz2
   build-linux-arm64:
     needs: set-env
     runs-on: ubuntu-24.04
@@ -61,7 +61,7 @@ jobs:
       uses: diamondburned/action-upload-release@v0.0.1
       with:
         files: ${{needs.set-env.outputs.name}}-${{needs.set-env.outputs.version}}-linux-arm64.bz2
-  build-darwin-amd64:
+  build-darwin-x86_64:
     needs: set-env
     runs-on: macos-13
     steps:
@@ -71,11 +71,11 @@ jobs:
     - name: Compress
       run: >
         cat "target/release/${{needs.set-env.outputs.name}}"
-        | bzip2 -9 -c > ${{needs.set-env.outputs.name}}-${{needs.set-env.outputs.version}}-darwin-amd64.bz2
+        | bzip2 -9 -c > ${{needs.set-env.outputs.name}}-${{needs.set-env.outputs.version}}-darwin-x86_64.bz2
     - name: Upload
       uses: diamondburned/action-upload-release@v0.0.1
       with:
-        files: ${{needs.set-env.outputs.name}}-${{needs.set-env.outputs.version}}-darwin-amd64.bz2
+        files: ${{needs.set-env.outputs.name}}-${{needs.set-env.outputs.version}}-darwin-x86_64.bz2
   build-darwin-arm64:
     needs: set-env
     runs-on: macos-14
