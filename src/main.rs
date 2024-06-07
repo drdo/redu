@@ -699,9 +699,21 @@ impl Speed {
 }
 
 pub fn new_pb(style: &str) -> ProgressBar {
-    let pb = ProgressBar::new_spinner()
-        .with_style(ProgressStyle::with_template(style).unwrap());
-    pb.enable_steady_tick(Duration::from_millis(500));
+    let frames = &[
+        "(●    )",
+        "( ●   )",
+        "(  ●  )",
+        "(   ● )",
+        "(   ● )",
+        "(  ●  )",
+        "( ●   )",
+        "(●    )",
+        "(●    )",
+    ];
+    let style = ProgressStyle::with_template(style).unwrap()
+        .tick_strings(frames);
+    let pb = ProgressBar::new_spinner().with_style(style);
+    pb.enable_steady_tick(Duration::from_millis(100));
     pb
 }
 
