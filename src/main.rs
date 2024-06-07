@@ -287,7 +287,7 @@ fn sync_snapshots(
             .map(|snapshot_id| cache.get_snapshot_group(snapshot_id))
             .collect::<Result<HashSet<u64>, rusqlite::Error>>()?;
         if groups_to_delete.len() > 0 {
-            eprintln!("Need to delete {} groups", groups_to_delete.len());
+            eprintln!("Need to delete {} group(s)", groups_to_delete.len());
             let pb = new_pb("{wide_bar} [{pos}/{len}] {spinner}");
             pb.set_length(groups_to_delete.len() as u64);
             for group in groups_to_delete {
