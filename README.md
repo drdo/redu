@@ -12,9 +12,13 @@ the culprits!
 # Installing
 
 You can either grab a pre-built binary from Github, currently available for:
-- Darwin (macos) arm64
+- Darwin (MacOS) arm64
+- Darwin (MacOS) x86-64
 - Linux arm64
-- Linux amd64
+- Linux x86-64
+
+Note: On MacOS if you download via browser you might need to remove quarantine with:
+`xattr -d com.apple.quarantine <binary name>`
 
 or you can install with cargo:
 ```
