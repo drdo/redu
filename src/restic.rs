@@ -7,6 +7,8 @@ use std::process::{Child, ChildStdout, Command, ExitStatusError, Stdio};
 use std::str::Utf8Error;
 
 use camino::Utf8PathBuf;
+use log::info;
+use scopeguard::defer;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::Value;
@@ -156,6 +158,8 @@ impl Restic {
         A: AsRef<OsStr>,
     {
         let child = self.run_command(args)?;
+        let id = child.id();
+        defer! { info!("finished pid {}", id); }
         let output = child.wait_with_output().map_err(|e| Error {
             kind: ErrorKind::Run(RunError::Io(e)),
             stderr: None,
@@ -195,18 +199,21 @@ impl Restic {
         }
         cmd.arg("--json");
         cmd.args(args);
-        Ok(cmd
+        let child = cmd
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(LaunchError)?)
+            .map_err(LaunchError)?;
+        info!("running \"{cmd:?}\" (pid {})", child.id());
+        Ok(child)
     }
 }
 
 struct Iter<T> {
     child: Child,
     lines: Lines<BufReader<ChildStdout>>,
+    finished: bool,
     _phantom_data: PhantomData<T>,
 }
 
@@ -216,6 +223,7 @@ impl<T> Iter<T> {
         Iter {
             child,
             lines: BufReader::new(stdout).lines(),
+            finished: false,
             _phantom_data: PhantomData::default(),
         }
     }
@@ -228,6 +236,12 @@ impl<T> Iter<T> {
                 stderr: None,
             }),
             Ok(_) => Err(Error { kind, stderr: Some(buf) }),
+        }
+    }
+
+    fn finish(&mut self) {
+        if ! self.finished {
+            info!("finished pid {}", self.child.id());
         }
     }
 }
@@ -243,10 +257,11 @@ impl<T: DeserializeOwned> Iterator for Iter<T> {
                 (value, line.len())
             };
             Some(match r_value {
-                Err(kind) => self.read_stderr(kind),
+                Err(kind) => { self.finish(); self.read_stderr(kind) }
                 Ok(value) => Ok(value),
             })
         } else {
+            self.finish();
             match self.child.wait() {
                 Err(e) =>
                     Some(self.read_stderr(ErrorKind::Run(RunError::Io(e)))),
