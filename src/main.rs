@@ -132,7 +132,7 @@ fn main() -> anyhow::Result<()> {
         Logger::with(spec)
             .log_to_file(filespec)
             .write_mode(WriteMode::BufferAndFlush)
-            .format(flexi_logger::detailed_format)
+            .format(flexi_logger::with_thread)
             .start()?
     };
 
@@ -329,6 +329,13 @@ fn sync_snapshots(
     };
 
     thread::scope(|scope| {
+        macro_rules! spawn {
+            ($name_fmt:literal, $scope:expr, $thunk:expr) => {
+                thread::Builder::new()
+                    .name(format!($name_fmt))
+                    .spawn_scoped($scope, $thunk)?
+            };
+        }
         let mut handles: Vec<ScopedJoinHandle<anyhow::Result<()>>> = Vec::new();
 
         // The threads periodically poll this to see if they should
@@ -340,12 +347,12 @@ fn sync_snapshots(
             mpsc::sync_channel::<(Box<str>, FileTree)>(2);
 
         // Start fetching threads
-        for _ in 0..fetching_thread_count {
+        for i in 0..fetching_thread_count {
             let missing_queue = missing_queue.clone();
             let snapshot_sender = snapshot_sender.clone();
             let speed = speed.clone();
             let should_quit = should_quit.clone();
-            handles.push(scope.spawn(move || {
+            handles.push(spawn!("fetching-{i}", &scope, move || {
                 fetching_thread_body(
                     restic,
                     missing_queue,
@@ -368,7 +375,7 @@ fn sync_snapshots(
         // Start grouping thread
         handles.push({
             let should_quit = should_quit.clone();
-            scope.spawn(move || {
+            spawn!("grouping", &scope, move || {
                 grouping_thread_body(
                     group_size,
                     snapshot_receiver,
@@ -384,7 +391,7 @@ fn sync_snapshots(
         // Start DB thread
         handles.push({
             let should_quit = should_quit.clone();
-            scope.spawn(move || {
+            spawn!("db", &scope, move || {
                 db_thread_body(cache, group_receiver, should_quit.clone())
                     .inspect_err(|_| should_quit.store(true, Ordering::SeqCst))
                     .map_err(anyhow::Error::from)
@@ -416,13 +423,13 @@ fn fetching_thread_body(
     mut speed: Speed,
     should_quit: Arc<AtomicBool>,
 ) -> Result<(), FetchingThreadError> {
-    defer! { trace!("(fetching-thread) terminated") }
-    trace!("(fetching-thread) started");
+    defer! { trace!("terminated") }
+    trace!("started");
     while let Some(snapshot) = missing_queue.pop() {
         let short_id = snapshot_short_id(&snapshot);
         let mut filetree = FileTree::new();
         let files = restic.ls(&snapshot)?;
-        trace!("(fetching-thread) started fetching snapshot ({short_id})");
+        trace!("started fetching snapshot ({short_id})");
         let start = Instant::now();
         for r in files {
             if should_quit.load(Ordering::SeqCst) {
@@ -435,20 +442,20 @@ fn fetching_thread_body(
                 .expect("repeated entry in restic snapshot ls");
         }
         info!(
-            "(fetching-thread) snapshot fetched in {}s ({short_id})",
+            "snapshot fetched in {}s ({short_id})",
             start.elapsed().as_secs_f64()
         );
-        trace!("(fetching-thread) got snapshot, sending ({short_id})");
+        trace!("got snapshot, sending ({short_id})");
         if should_quit.load(Ordering::SeqCst) {
             return Ok(());
         }
         let start = Instant::now();
         snapshot_sender.send((snapshot.clone(), filetree)).unwrap();
         info!(
-            "(fetching-thread) waited {}s to send snapshot ({short_id})",
+            "waited {}s to send snapshot ({short_id})",
             start.elapsed().as_secs_f64()
         );
-        trace!("(fetching-thread) snapshot sent ({short_id})");
+        trace!("snapshot sent ({short_id})");
     }
     speed.stop();
     Ok(())
@@ -467,11 +474,11 @@ fn grouping_thread_body(
     pb: ProgressBar,
     should_quit: Arc<AtomicBool>,
 ) -> Result<(), GroupingThreadError> {
-    defer! { trace!("(grouping-thread) terminated") }
-    trace!("(grouping-thread) started");
+    defer! { trace!("terminated") }
+    trace!("started");
     let mut group = SnapshotGroup::new();
     loop {
-        trace!("(grouping-thread) waiting for snapshot");
+        trace!("waiting for snapshot");
         if should_quit.load(Ordering::SeqCst) {
             return Ok(());
         }
@@ -481,50 +488,50 @@ fn grouping_thread_body(
             Ok((snapshot, filetree)) => {
                 let short_id = snapshot_short_id(&snapshot);
                 info!(
-                    "(grouping-thread) waited {}s to get snapshot ({short_id})",
+                    "waited {}s to get snapshot ({short_id})",
                     start.elapsed().as_secs_f64()
                 );
-                trace!("(grouping-thread) got snapshot ({short_id})");
+                trace!("got snapshot ({short_id})");
                 if should_quit.load(Ordering::SeqCst) {
                     return Ok(());
                 }
                 group.add_snapshot(snapshot.clone(), filetree);
                 pb.inc(1);
-                trace!("(grouping-thread) added snapshot ({short_id})");
+                trace!("added snapshot ({short_id})");
                 if group.count() == group_size {
-                    trace!("(grouping-thread) group is full, sending");
+                    trace!("group is full, sending");
                     if should_quit.load(Ordering::SeqCst) {
                         return Ok(());
                     }
                     let start = Instant::now();
                     group_sender.send(group).unwrap();
                     info!(
-                        "(grouping-thread) waited {}s to send group",
+                        "waited {}s to send group",
                         start.elapsed().as_secs_f64()
                     );
-                    trace!("(grouping-thread) sent group");
+                    trace!("sent group");
                     group = SnapshotGroup::new();
                 }
             }
             Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => {
-                trace!("(grouping-thread) loop done");
+                trace!("loop done");
                 break;
             }
         }
     }
     if group.count() > 0 {
-        trace!("(grouping-thread) sending leftover group");
+        trace!("sending leftover group");
         if should_quit.load(Ordering::SeqCst) {
             return Ok(());
         }
         let start = Instant::now();
         group_sender.send(group).unwrap();
         info!(
-            "(grouping-thread) waited {}s to send leftover group",
+            "waited {}s to send leftover group",
             start.elapsed().as_secs_f64()
         );
-        trace!("(grouping-thread) sent leftover group");
+        trace!("sent leftover group");
     }
     pb.finish_with_message("Done");
     Ok(())
@@ -541,10 +548,10 @@ fn db_thread_body(
     group_receiver: mpsc::Receiver<SnapshotGroup>,
     should_quit: Arc<AtomicBool>,
 ) -> Result<(), DBThreadError> {
-    defer! { trace!("(db-thread) terminated") }
-    trace!("(db-thread) started");
+    defer! { trace!("terminated") }
+    trace!("started");
     loop {
-        trace!("(db-thread) waiting for group");
+        trace!("waiting for group");
         if should_quit.load(Ordering::SeqCst) {
             return Ok(());
         }
@@ -553,10 +560,10 @@ fn db_thread_body(
         match group_receiver.recv_timeout(Duration::from_millis(500)) {
             Ok(group) => {
                 info!(
-                    "(db-thread) waited {}s to get group",
+                    "waited {}s to get group",
                     start.elapsed().as_secs_f64()
                 );
-                trace!("(db-thread) got group, saving");
+                trace!("got group, saving");
                 if should_quit.load(Ordering::SeqCst) {
                     return Ok(());
                 }
@@ -565,14 +572,14 @@ fn db_thread_body(
                     .save_snapshot_group(group)
                     .expect("unable to save snapshot group");
                 info!(
-                    "(db-thread) waited {}s to save group",
+                    "waited {}s to save group",
                     start.elapsed().as_secs_f64()
                 );
-                trace!("(db-thread) group saved");
+                trace!("group saved");
             }
             Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => {
-                trace!("(db-thread) loop done");
+                trace!("loop done");
                 break Ok(());
             }
         }
