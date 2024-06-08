@@ -316,7 +316,7 @@ fn sync_snapshots(
 
     // Create progress indicators
     let mpb = MultiProgress::new();
-    let pb = mpb.add(new_pb(" {spinner} {prefix} {wide_bar} [{pos}/{len}] "));
+    let pb = mpb_add(&mpb, " {spinner} {prefix} {wide_bar} [{pos}/{len}] ");
     pb.set_prefix("Fetching snapshots");
     pb.set_length(total_missing_snapshots as u64);
 
@@ -427,10 +427,8 @@ fn fetching_thread_body(
     trace!("started");
     while let Some(snapshot) = missing_queue.pop() {
         let short_id = snapshot_short_id(&snapshot);
-        let pb = mpb.add(
-            new_pb("   {spinner} fetching {prefix}: starting up")
-                .with_prefix(short_id.clone())
-        );
+        let pb = mpb_add(mpb, "   {spinner} fetching {prefix}: starting up")
+            .with_prefix(short_id.clone());
         let mut filetree = FileTree::new();
         let files = restic.ls(&snapshot)?;
         trace!("started fetching snapshot ({short_id})");
@@ -444,11 +442,14 @@ fn fetching_thread_body(
                 .insert(&file.path, file.size)
                 .expect("repeated entry in restic snapshot ls");
             if pb.position() == 0 {
-                pb.set_style(new_style("   {spinner} fetching {prefix}: {pos} file(s)"));
+                pb.set_style(new_style(
+                    "   {spinner} fetching {prefix}: {pos} file(s)",
+                ));
             }
             pb.inc(1);
         }
         pb.finish_and_clear();
+        mpb.remove(&pb);
         info!(
             "snapshot fetched in {}s ({short_id})",
             start.elapsed().as_secs_f64()
@@ -464,7 +465,6 @@ fn fetching_thread_body(
             start.elapsed().as_secs_f64()
         );
         trace!("snapshot sent ({short_id})");
-        mpb.remove(&pb);
     }
     Ok(())
 }
@@ -662,6 +662,12 @@ pub fn new_style(template: &str) -> ProgressStyle {
 
 pub fn new_pb(template: &str) -> ProgressBar {
     let pb = ProgressBar::new_spinner().with_style(new_style(template));
+    pb.enable_steady_tick(Duration::from_millis(100));
+    pb
+}
+
+pub fn mpb_add(mpb: &MultiProgress, template: &str) -> ProgressBar {
+    let pb = mpb.add(ProgressBar::new_spinner().with_style(new_style(template)));
     pb.enable_steady_tick(Duration::from_millis(100));
     pb
 }
