@@ -427,8 +427,10 @@ fn fetching_thread_body(
     trace!("started");
     while let Some(snapshot) = missing_queue.pop() {
         let short_id = snapshot_short_id(&snapshot);
-        let pb = mpb.add(new_pb("   {spinner} fetching {prefix}: starting up"));
-        pb.set_prefix(short_id.clone());
+        let pb = mpb.add(
+            new_pb("   {spinner} fetching {prefix}: starting up")
+                .with_prefix(short_id.clone())
+        );
         let mut filetree = FileTree::new();
         let files = restic.ls(&snapshot)?;
         trace!("started fetching snapshot ({short_id})");
