@@ -240,7 +240,7 @@ impl<T> Iter<T> {
     }
 
     fn finish(&mut self) {
-        if ! self.finished {
+        if !self.finished {
             info!("finished pid {}", self.child.id());
         }
     }
@@ -257,7 +257,10 @@ impl<T: DeserializeOwned> Iterator for Iter<T> {
                 (value, line.len())
             };
             Some(match r_value {
-                Err(kind) => { self.finish(); self.read_stderr(kind) }
+                Err(kind) => {
+                    self.finish();
+                    self.read_stderr(kind)
+                }
                 Ok(value) => Ok(value),
             })
         } else {
