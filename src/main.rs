@@ -320,6 +320,8 @@ fn sync_snapshots(
     pb.set_prefix("Fetching snapshots");
     pb.set_length(total_missing_snapshots as u64);
 
+    const SHOULD_QUIT_POLL_PERIOD: Duration = Duration::from_millis(500);
+
     thread::scope(|scope| {
         macro_rules! spawn {
             ($name_fmt:literal, $scope:expr, $thunk:expr) => {
@@ -374,6 +376,7 @@ fn sync_snapshots(
                     group_sender,
                     pb,
                     should_quit.clone(),
+                    SHOULD_QUIT_POLL_PERIOD,
                 )
                 .inspect_err(|_| should_quit.store(true, Ordering::SeqCst))
                 .map_err(anyhow::Error::from)
@@ -384,9 +387,14 @@ fn sync_snapshots(
         handles.push({
             let should_quit = should_quit.clone();
             spawn!("db", &scope, move || {
-                db_thread_body(cache, group_receiver, should_quit.clone())
-                    .inspect_err(|_| should_quit.store(true, Ordering::SeqCst))
-                    .map_err(anyhow::Error::from)
+                db_thread_body(
+                    cache,
+                    group_receiver,
+                    should_quit.clone(),
+                    SHOULD_QUIT_POLL_PERIOD,
+                )
+                .inspect_err(|_| should_quit.store(true, Ordering::SeqCst))
+                .map_err(anyhow::Error::from)
             })
         });
 
@@ -471,6 +479,7 @@ fn grouping_thread_body(
     group_sender: mpsc::SyncSender<SnapshotGroup>,
     pb: ProgressBar,
     should_quit: Arc<AtomicBool>,
+    should_quit_poll_period: Duration,
 ) -> Result<(), GroupingThreadError> {
     defer! { trace!("terminated") }
     trace!("started");
@@ -482,7 +491,7 @@ fn grouping_thread_body(
         }
         let start = Instant::now();
         // We wait with timeout to poll the should_quit periodically
-        match snapshot_receiver.recv_timeout(Duration::from_millis(500)) {
+        match snapshot_receiver.recv_timeout(should_quit_poll_period) {
             Ok((snapshot, filetree)) => {
                 let short_id = snapshot_short_id(&snapshot);
                 info!(
@@ -545,6 +554,7 @@ fn db_thread_body(
     cache: &mut Cache,
     group_receiver: mpsc::Receiver<SnapshotGroup>,
     should_quit: Arc<AtomicBool>,
+    should_quit_poll_period: Duration,
 ) -> Result<(), DBThreadError> {
     defer! { trace!("terminated") }
     trace!("started");
@@ -555,7 +565,7 @@ fn db_thread_body(
         }
         let start = Instant::now();
         // We wait with timeout to poll the should_quit periodically
-        match group_receiver.recv_timeout(Duration::from_millis(500)) {
+        match group_receiver.recv_timeout(should_quit_poll_period) {
             Ok(group) => {
                 info!("waited {}s to get group", start.elapsed().as_secs_f64());
                 trace!("got group, saving");
