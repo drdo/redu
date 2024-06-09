@@ -660,15 +660,18 @@ pub fn new_style(template: &str) -> ProgressStyle {
     ProgressStyle::with_template(template).unwrap().tick_strings(frames)
 }
 
+const PB_TICK_INTERVAL: Duration = Duration::from_millis(100);
+
 pub fn new_pb(template: &str) -> ProgressBar {
     let pb = ProgressBar::new_spinner().with_style(new_style(template));
-    pb.enable_steady_tick(Duration::from_millis(100));
+    pb.enable_steady_tick(PB_TICK_INTERVAL);
     pb
 }
 
 pub fn mpb_add(mpb: &MultiProgress, template: &str) -> ProgressBar {
-    let pb = mpb.add(ProgressBar::new_spinner().with_style(new_style(template)));
-    pb.enable_steady_tick(Duration::from_millis(100));
+    let pb =
+        mpb.add(ProgressBar::new_spinner().with_style(new_style(template)));
+    pb.enable_steady_tick(PB_TICK_INTERVAL);
     pb
 }
 
