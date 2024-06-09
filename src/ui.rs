@@ -453,7 +453,7 @@ impl WidgetRef for App {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         let (header_rect, list_rect, footer_rect) = compute_layout(area);
         {
-            // Heading
+            // Header
             let mut string = "--- ".to_string();
             string.push_str(
                 shorten_to(
@@ -461,7 +461,8 @@ impl WidgetRef for App {
                         None => "#",
                         Some(path) => path.as_str(),
                     },
-                    header_rect.width as usize - string.len(),
+                    max(0, header_rect.width as isize - string.len() as isize)
+                        as usize,
                 )
                 .as_ref(),
             );
