@@ -645,7 +645,7 @@ fn render<'a>(
 }
 
 /// Util ///////////////////////////////////////////////////////////////////////
-pub fn new_style(template: &str) -> ProgressStyle {
+fn new_style(template: &str) -> ProgressStyle {
     let frames = &[
         "(●    )",
         "( ●   )",
@@ -662,7 +662,7 @@ pub fn new_style(template: &str) -> ProgressStyle {
 
 const PB_TICK_INTERVAL: Duration = Duration::from_millis(100);
 
-pub fn new_pb(template: &str) -> ProgressBar {
+fn new_pb(template: &str) -> ProgressBar {
     let pb = ProgressBar::new_spinner().with_style(new_style(template));
     pb.enable_steady_tick(PB_TICK_INTERVAL);
     pb
@@ -670,7 +670,7 @@ pub fn new_pb(template: &str) -> ProgressBar {
 
 // This is necessary to avoid some weird redraws that happen
 // when enabling the tick thread before adding to the MultiProgress.
-pub fn mpb_add(mpb: &MultiProgress, template: &str) -> ProgressBar {
+fn mpb_add(mpb: &MultiProgress, template: &str) -> ProgressBar {
     let pb =
         mpb.add(ProgressBar::new_spinner().with_style(new_style(template)));
     pb.enable_steady_tick(PB_TICK_INTERVAL);
