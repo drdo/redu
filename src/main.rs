@@ -668,6 +668,8 @@ pub fn new_pb(template: &str) -> ProgressBar {
     pb
 }
 
+// This is necessary to avoid some weird redraws that happen
+// when enabling the tick thread before adding to the MultiProgress.
 pub fn mpb_add(mpb: &MultiProgress, template: &str) -> ProgressBar {
     let pb =
         mpb.add(ProgressBar::new_spinner().with_style(new_style(template)));
