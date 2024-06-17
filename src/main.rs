@@ -9,6 +9,7 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread::ScopedJoinHandle;
 use std::time::{Duration, Instant};
 use std::{fs, panic, thread};
+use anyhow::Context;
 
 use camino::Utf8Path;
 use clap::{command, Parser};
@@ -165,12 +166,12 @@ fn main() -> anyhow::Result<()> {
                 eprintln!("### Cache file corruption detected! Deleting and recreating. ###");
                 // Try to delete and reopen
                 fs::remove_file(&cache_file)
-                    .expect("unable to remove corrupted cache file");
+                    .context("unable to remove corrupted cache file")?;
                 eprintln!("Corrupted cache file deleted");
                 Cache::open(&cache_file)
             }
             x => x,
-        }.expect("unable to open cache file")
+        }.context("unable to open cache file")?
     };
 
     sync_snapshots(
