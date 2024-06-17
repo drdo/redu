@@ -1,6 +1,3 @@
-PRAGMA journal_mode = WAL;
-PRAGMA synchronous = NORMAL;
-
 -- snapshots
 CREATE TABLE IF NOT EXISTS snapshots (
     id TEXT PRIMARY KEY,

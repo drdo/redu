@@ -3,24 +3,28 @@ use std::path::Path;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use log::trace;
+use refinery::embed_migrations;
+use rusqlite::{Connection, params, Row};
 use rusqlite::functions::FunctionFlags;
-use rusqlite::{params, Connection, Row};
+use thiserror::Error;
 
 use crate::cache::filetree::FileTree;
 use crate::types::{Directory, Entry, File};
 
 pub mod filetree;
 
-pub fn is_corruption_error(error: &rusqlite::Error) -> bool {
+embed_migrations!("src/cache/sql_migrations");
+
+pub fn is_corruption_error(error: &OpenError) -> bool {
     const CORRUPTION_CODES: [rusqlite::ErrorCode; 2] = [
         rusqlite::ErrorCode::DatabaseCorrupt,
         rusqlite::ErrorCode::NotADatabase,
     ];
     match error {
-        rusqlite::Error::SqliteFailure(
+        OpenError::Sqlite(rusqlite::Error::SqliteFailure(
             rusqlite::ffi::Error { code, .. },
             _,
-        ) => CORRUPTION_CODES.contains(code),
+        )) => CORRUPTION_CODES.contains(code),
         _ => false,
     }
 }
@@ -30,9 +34,20 @@ pub struct Cache {
     conn: Connection,
 }
 
+#[derive(Error, Debug)]
+pub enum OpenError {
+    #[error("Sqlite error")]
+    Sqlite(#[from] rusqlite::Error),
+    #[error("Error running migrations")]
+    Migration(#[from] refinery::Error),
+}
+
 impl Cache {
-    pub fn open(file: &Path) -> Result<Self, rusqlite::Error> {
+    pub fn open(file: &Path) -> Result<Self, OpenError> {
         let mut conn = Connection::open(&file)?;
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
+
         conn.create_scalar_function(
             "path_parent",
             1,
@@ -48,7 +63,7 @@ impl Cache {
         conn.profile(Some(|stmt, duration| {
             trace!("SQL {stmt} (took {duration:#?})")
         }));
-        conn.execute_batch(include_str!("sql/init.sql"))?;
+        migrations::runner().run(&mut conn)?;
         Ok(Cache { conn })
     }
 
