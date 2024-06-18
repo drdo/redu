@@ -157,7 +157,7 @@ fn main() -> anyhow::Result<()> {
             }
             migrator => migrator,
         }.context("unable to open cache file")?;
- 
+
         if migrator.need_to_migrate() {
             let pb = new_pb(" {spinner} Upgrading cache version");
             let cache = migrator.migrate()?;
@@ -308,7 +308,7 @@ fn sync_snapshots(
 
     // Create progress indicators
     let mpb = MultiProgress::new();
-    let pb = mpb_add(&mpb, " {spinner} {prefix} {wide_bar} [{pos}/{len}] ");
+    let pb = mpb_insert_end(&mpb, " {spinner} {prefix} {wide_bar} [{pos}/{len}] ");
     pb.set_prefix("Fetching snapshots");
     pb.set_length(total_missing_snapshots as u64);
 
@@ -336,7 +336,7 @@ fn sync_snapshots(
         for i in 0..fetching_thread_count {
             let missing_queue = missing_queue.clone();
             let snapshot_sender = snapshot_sender.clone();
-            let mpb = &mpb;
+            let mpb = mpb.clone();
             let should_quit = should_quit.clone();
             handles.push(spawn!("fetching-{i}", &scope, move || {
                 fetching_thread_body(
@@ -360,6 +360,7 @@ fn sync_snapshots(
             spawn!("db", &scope, move || {
                 db_thread_body(
                     cache,
+                    mpb,
                     pb,
                     snapshot_receiver,
                     should_quit.clone(),
@@ -388,7 +389,7 @@ enum FetchingThreadError {
 fn fetching_thread_body(
     restic: &Restic,
     missing_queue: Queue<Box<str>>,
-    mpb: &MultiProgress,
+    mpb: MultiProgress,
     snapshot_sender: mpsc::SyncSender<(Box<str>, FileTree)>,
     should_quit: Arc<AtomicBool>,
 ) -> Result<(), FetchingThreadError> {
@@ -396,7 +397,7 @@ fn fetching_thread_body(
     trace!("started");
     while let Some(snapshot) = missing_queue.pop() {
         let short_id = snapshot_short_id(&snapshot);
-        let pb = mpb_add(mpb, "   {spinner} fetching {prefix}: starting up")
+        let pb = mpb_insert_end(&mpb, "   {spinner} fetching {prefix}: starting up")
             .with_prefix(short_id.clone());
         let mut filetree = FileTree::new();
         let files = restic.ls(&snapshot)?;
@@ -446,7 +447,8 @@ enum DBThreadError {
 
 fn db_thread_body(
     cache: &mut Cache,
-    pb: ProgressBar,
+    mpb: MultiProgress,
+    main_pb: ProgressBar,
     snapshot_receiver: mpsc::Receiver<(Box<str>, FileTree)>,
     should_quit: Arc<AtomicBool>,
     should_quit_poll_period: Duration,
@@ -467,9 +469,14 @@ fn db_thread_body(
                 if should_quit.load(Ordering::SeqCst) {
                     return Ok(());
                 }
+                let short_id = snapshot_short_id(&id);
+                let pb = mpb_insert_after(&mpb, &main_pb, "   {spinner} saving {prefix}")
+                    .with_prefix(short_id.clone());
                 let start = Instant::now();
                 cache.save_snapshot(id, filetree)?;
-                pb.inc(1);
+                pb.finish_and_clear();
+                mpb.remove(&pb);
+                main_pb.inc(1);
                 info!(
                     "waited {}s to save snapshot",
                     start.elapsed().as_secs_f64()
@@ -562,9 +569,16 @@ fn new_pb(template: &str) -> ProgressBar {
 
 // This is necessary to avoid some weird redraws that happen
 // when enabling the tick thread before adding to the MultiProgress.
-fn mpb_add(mpb: &MultiProgress, template: &str) -> ProgressBar {
-    let pb =
-        mpb.add(ProgressBar::new_spinner().with_style(new_style(template)));
+fn mpb_insert_after(mpb: &MultiProgress, other_pb: &ProgressBar, template: &str) -> ProgressBar {
+    let pb = ProgressBar::new_spinner().with_style(new_style(template));
+    let pb = mpb.insert_after(other_pb, pb);
+    pb.enable_steady_tick(PB_TICK_INTERVAL);
+    pb
+}
+
+fn mpb_insert_end(mpb: &MultiProgress, template: &str) -> ProgressBar {
+    let pb = ProgressBar::new_spinner().with_style(new_style(template));
+    let pb = mpb.add(pb);
     pb.enable_steady_tick(PB_TICK_INTERVAL);
     pb
 }
