@@ -351,6 +351,7 @@ fn sync_snapshots(
             spawn!("db", &scope, move || {
                 db_thread_body(
                     cache,
+                    pb,
                     snapshot_receiver,
                     should_quit.clone(),
                     SHOULD_QUIT_POLL_PERIOD,
@@ -436,6 +437,7 @@ enum DBThreadError {
 
 fn db_thread_body(
     cache: &mut Cache,
+    pb: ProgressBar,
     snapshot_receiver: mpsc::Receiver<(Box<str>, FileTree)>,
     should_quit: Arc<AtomicBool>,
     should_quit_poll_period: Duration,
@@ -458,6 +460,7 @@ fn db_thread_body(
                 }
                 let start = Instant::now();
                 cache.save_snapshot(id, filetree)?;
+                pb.inc(1);
                 info!(
                     "waited {}s to save snapshot",
                     start.elapsed().as_secs_f64()
