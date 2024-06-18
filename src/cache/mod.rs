@@ -53,7 +53,7 @@ impl Migrator {
         self.runner.run(&mut self.conn)?;
         Ok(Cache { conn: self.conn })
     }
-    
+
     pub fn need_to_migrate(&self) -> bool {
         self.need_to_migrate
     }
@@ -109,7 +109,18 @@ impl Cache {
                 Target::Version(v) => Some(v),
                 Target::FakeVersion(v) => Some(v),
             };
-            let applied_migrations = runner.get_applied_migrations(&mut conn)?;
+            let applied_migrations = {
+                let stmt = "\
+                    SELECT name FROM sqlite_master
+                    WHERE type='table' AND name='refinery_schema_history'";
+                let refinery_schema_history_exists =
+                    conn.query_row(stmt, [], |_| Ok(())).optional()?.is_some();
+                if refinery_schema_history_exists {
+                    runner.get_applied_migrations(&mut conn)?
+                } else {
+                    vec![]
+                }
+            };
             target_version
                 .map(|t| applied_migrations
                     .iter()
