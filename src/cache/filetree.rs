@@ -5,7 +5,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 
 use crate::types::{Directory, Entry, File};
 
-#[derive(Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct FileTree {
     size: usize,
     children: HashMap<Box<str>, FileTree>,
