@@ -44,6 +44,21 @@ pub enum OpenError {
 
 impl Cache {
     pub fn open(file: &Path) -> Result<Self, OpenError> {
+        Self::open_(file, refinery::Target::Latest)
+    }
+
+    #[cfg(test)]
+    pub fn open_with_target(
+        file: &Path,
+        migration_target: refinery::Target,
+    ) -> Result<Self, OpenError> {
+        Self::open_(file, migration_target)
+    }
+
+    fn open_(
+        file: &Path,
+        migration_target: refinery::Target,
+    ) -> Result<Self, OpenError> {
         let mut conn = Connection::open(&file)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
@@ -63,7 +78,9 @@ impl Cache {
         conn.profile(Some(|stmt, duration| {
             trace!("SQL {stmt} (took {duration:#?})")
         }));
-        migrations::runner().run(&mut conn)?;
+        migrations::runner()
+            .set_target(migration_target)
+            .run(&mut conn)?;
         Ok(Cache { conn })
     }
 
