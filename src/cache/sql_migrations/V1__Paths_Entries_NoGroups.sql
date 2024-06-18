@@ -25,3 +25,4 @@ CREATE TABLE entries (
     is_dir INTEGER,
     PRIMARY KEY (snapshot_id, path_id)
 );
+CREATE INDEX entries_path_id ON entries (path_id);
