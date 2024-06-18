@@ -1,7 +1,6 @@
 #![feature(panic_update_hook)]
 
 use std::borrow::Cow;
-use std::collections::HashSet;
 use std::io::stderr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
@@ -10,6 +9,7 @@ use std::thread::ScopedJoinHandle;
 use std::time::{Duration, Instant};
 use std::{fs, panic, thread};
 
+use anyhow::Context;
 use camino::Utf8Path;
 use clap::{command, Parser};
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -28,7 +28,7 @@ use ratatui::style::Stylize;
 use ratatui::widgets::WidgetRef;
 use ratatui::{CompletedFrame, Terminal};
 use redu::cache::filetree::FileTree;
-use redu::cache::{Cache, SnapshotGroup};
+use redu::cache::Cache;
 use redu::restic::Restic;
 use redu::{cache, restic};
 use scopeguard::defer;
@@ -84,21 +84,6 @@ struct Cli {
             try lowering this."
     )]
     fetching_thread_count: usize,
-    #[arg(
-        long,
-        default_value_t = 8,
-        long_help = "
-            How big to make each group of snapshots.
-
-            A group is saved by merging the info of the snapshots in the group.
-            This is primarily to save disk space but it also speeds up
-            writing to the cache when doing a sync.
-
-            The disadvantage is that if we need to delete a snapshot because
-            it was removed from the repo then we must delete the entire group
-            that that snapshot belongs to."
-    )]
-    group_size: usize,
     #[arg(
         short = 'v',
         action = clap::ArgAction::Count,
@@ -160,25 +145,29 @@ fn main() -> anyhow::Result<()> {
         ));
 
         eprintln!("Using cache file {cache_file:#?}");
-        match Cache::open(&cache_file) {
+        let migrator = match Cache::open(&cache_file) {
             Err(e) if cache::is_corruption_error(&e) => {
                 eprintln!("### Cache file corruption detected! Deleting and recreating. ###");
                 // Try to delete and reopen
                 fs::remove_file(&cache_file)
-                    .expect("unable to remove corrupted cache file");
+                    .context("unable to remove corrupted cache file")?;
                 eprintln!("Corrupted cache file deleted");
                 Cache::open(&cache_file)
             }
-            x => x,
-        }.expect("unable to open cache file")
+            migrator => migrator,
+        }.context("unable to open cache file")?;
+
+        if migrator.need_to_migrate() {
+            let pb = new_pb(" {spinner} Upgrading cache version");
+            let cache = migrator.migrate()?;
+            pb.finish();
+            cache
+        } else {
+            migrator.migrate()?
+        }
     };
 
-    sync_snapshots(
-        &restic,
-        &mut cache,
-        cli.fetching_thread_count,
-        cli.group_size,
-    )?;
+    sync_snapshots(&restic, &mut cache, cli.fetching_thread_count)?;
 
     // UI
     stderr().execute(EnterAlternateScreen)?;
@@ -266,7 +255,6 @@ fn sync_snapshots(
     restic: &Restic,
     cache: &mut Cache,
     fetching_thread_count: usize,
-    group_size: usize,
 ) -> anyhow::Result<()> {
     // Figure out what snapshots we need to fetch
     let missing_snapshots: Vec<Box<str>> = {
@@ -280,18 +268,20 @@ fn sync_snapshots(
         pb.finish();
 
         // Delete snapshots from the DB that were deleted on the repo
-        let groups_to_delete = cache
+        let snapshots_to_delete = cache
             .get_snapshots()?
             .into_iter()
             .filter(|snapshot| !repo_snapshots.contains(&snapshot))
-            .map(|snapshot_id| cache.get_snapshot_group(snapshot_id))
-            .collect::<Result<HashSet<u64>, rusqlite::Error>>()?;
-        if groups_to_delete.len() > 0 {
-            eprintln!("Need to delete {} group(s)", groups_to_delete.len());
+            .collect::<Vec<Box<str>>>();
+        if snapshots_to_delete.len() > 0 {
+            eprintln!(
+                "Need to delete {} snapshot(s)",
+                snapshots_to_delete.len()
+            );
             let pb = new_pb(" {spinner} {wide_bar} [{pos}/{len}]");
-            pb.set_length(groups_to_delete.len() as u64);
-            for group in groups_to_delete {
-                cache.delete_group(group)?;
+            pb.set_length(snapshots_to_delete.len() as u64);
+            for snapshot in snapshots_to_delete {
+                cache.delete_snapshot(snapshot)?;
                 pb.inc(1);
             }
             pb.finish();
@@ -316,7 +306,8 @@ fn sync_snapshots(
 
     // Create progress indicators
     let mpb = MultiProgress::new();
-    let pb = mpb_add(&mpb, " {spinner} {prefix} {wide_bar} [{pos}/{len}] ");
+    let pb =
+        mpb_insert_end(&mpb, " {spinner} {prefix} {wide_bar} [{pos}/{len}] ");
     pb.set_prefix("Fetching snapshots");
     pb.set_length(total_missing_snapshots as u64);
 
@@ -336,7 +327,7 @@ fn sync_snapshots(
         // prematurely terminate (when other threads get unrecoverable errors).
         let should_quit: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
 
-        // Channel to funnel snapshots from the fetching threads to the grouping thread
+        // Channel to funnel snapshots from the fetching threads to the db thread
         let (snapshot_sender, snapshot_receiver) =
             mpsc::sync_channel::<(Box<str>, FileTree)>(2);
 
@@ -344,7 +335,7 @@ fn sync_snapshots(
         for i in 0..fetching_thread_count {
             let missing_queue = missing_queue.clone();
             let snapshot_sender = snapshot_sender.clone();
-            let mpb = &mpb;
+            let mpb = mpb.clone();
             let should_quit = should_quit.clone();
             handles.push(spawn!("fetching-{i}", &scope, move || {
                 fetching_thread_body(
@@ -358,30 +349,9 @@ fn sync_snapshots(
                 .map_err(anyhow::Error::from)
             }));
         }
-        // Drop the leftover channel so that the grouping thread
+        // Drop the leftover channel so that the db thread
         // can properly terminate when all snapshot senders are closed
         drop(snapshot_sender);
-
-        // Channel to funnel groups from the grouping thread to the db thread
-        let (group_sender, group_receiver) =
-            mpsc::sync_channel::<SnapshotGroup>(1);
-
-        // Start grouping thread
-        handles.push({
-            let should_quit = should_quit.clone();
-            spawn!("grouping", &scope, move || {
-                grouping_thread_body(
-                    group_size,
-                    snapshot_receiver,
-                    group_sender,
-                    pb,
-                    should_quit.clone(),
-                    SHOULD_QUIT_POLL_PERIOD,
-                )
-                .inspect_err(|_| should_quit.store(true, Ordering::SeqCst))
-                .map_err(anyhow::Error::from)
-            })
-        });
 
         // Start DB thread
         handles.push({
@@ -389,7 +359,9 @@ fn sync_snapshots(
             spawn!("db", &scope, move || {
                 db_thread_body(
                     cache,
-                    group_receiver,
+                    mpb,
+                    pb,
+                    snapshot_receiver,
                     should_quit.clone(),
                     SHOULD_QUIT_POLL_PERIOD,
                 )
@@ -397,9 +369,6 @@ fn sync_snapshots(
                 .map_err(anyhow::Error::from)
             })
         });
-
-        // Drop the senders that weren't moved into threads so that
-        // the receivers can detect when everyone is done
 
         for handle in handles {
             handle.join().unwrap()?
@@ -419,7 +388,7 @@ enum FetchingThreadError {
 fn fetching_thread_body(
     restic: &Restic,
     missing_queue: Queue<Box<str>>,
-    mpb: &MultiProgress,
+    mpb: MultiProgress,
     snapshot_sender: mpsc::SyncSender<(Box<str>, FileTree)>,
     should_quit: Arc<AtomicBool>,
 ) -> Result<(), FetchingThreadError> {
@@ -427,8 +396,9 @@ fn fetching_thread_body(
     trace!("started");
     while let Some(snapshot) = missing_queue.pop() {
         let short_id = snapshot_short_id(&snapshot);
-        let pb = mpb_add(mpb, "   {spinner} fetching {prefix}: starting up")
-            .with_prefix(short_id.clone());
+        let pb =
+            mpb_insert_end(&mpb, "   {spinner} fetching {prefix}: starting up")
+                .with_prefix(short_id.clone());
         let mut filetree = FileTree::new();
         let files = restic.ls(&snapshot)?;
         trace!("started fetching snapshot ({short_id})");
@@ -470,22 +440,21 @@ fn fetching_thread_body(
 }
 
 #[derive(Debug, Error)]
-#[error("error in grouping thread")]
-enum GroupingThreadError {
+#[error("error in db thread")]
+enum DBThreadError {
     CacheError(#[from] rusqlite::Error),
 }
 
-fn grouping_thread_body(
-    group_size: usize,
+fn db_thread_body(
+    cache: &mut Cache,
+    mpb: MultiProgress,
+    main_pb: ProgressBar,
     snapshot_receiver: mpsc::Receiver<(Box<str>, FileTree)>,
-    group_sender: mpsc::SyncSender<SnapshotGroup>,
-    pb: ProgressBar,
     should_quit: Arc<AtomicBool>,
     should_quit_poll_period: Duration,
-) -> Result<(), GroupingThreadError> {
+) -> Result<(), DBThreadError> {
     defer! { trace!("terminated") }
     trace!("started");
-    let mut group = SnapshotGroup::new();
     loop {
         trace!("waiting for snapshot");
         if should_quit.load(Ordering::SeqCst) {
@@ -494,95 +463,32 @@ fn grouping_thread_body(
         let start = Instant::now();
         // We wait with timeout to poll the should_quit periodically
         match snapshot_receiver.recv_timeout(should_quit_poll_period) {
-            Ok((snapshot, filetree)) => {
-                let short_id = snapshot_short_id(&snapshot);
+            Ok((id, filetree)) => {
                 info!(
-                    "waited {}s to get snapshot ({short_id})",
+                    "waited {}s to get snapshot",
                     start.elapsed().as_secs_f64()
                 );
-                trace!("got snapshot ({short_id})");
+                trace!("got snapshot, saving");
                 if should_quit.load(Ordering::SeqCst) {
                     return Ok(());
                 }
-                group.add_snapshot(snapshot.clone(), filetree);
-                pb.inc(1);
-                trace!("added snapshot ({short_id})");
-                if group.count() == group_size {
-                    trace!("group is full, sending");
-                    if should_quit.load(Ordering::SeqCst) {
-                        return Ok(());
-                    }
-                    let start = Instant::now();
-                    group_sender.send(group).unwrap();
-                    info!(
-                        "waited {}s to send group",
-                        start.elapsed().as_secs_f64()
-                    );
-                    trace!("sent group");
-                    group = SnapshotGroup::new();
-                }
-            }
-            Err(RecvTimeoutError::Timeout) => continue,
-            Err(RecvTimeoutError::Disconnected) => {
-                trace!("loop done");
-                break;
-            }
-        }
-    }
-    if group.count() > 0 {
-        trace!("sending leftover group");
-        if should_quit.load(Ordering::SeqCst) {
-            return Ok(());
-        }
-        let start = Instant::now();
-        group_sender.send(group).unwrap();
-        info!(
-            "waited {}s to send leftover group",
-            start.elapsed().as_secs_f64()
-        );
-        trace!("sent leftover group");
-    }
-    pb.finish_with_message("Done");
-    Ok(())
-}
-
-#[derive(Debug, Error)]
-#[error("error in db thread")]
-enum DBThreadError {
-    CacheError(#[from] rusqlite::Error),
-}
-
-fn db_thread_body(
-    cache: &mut Cache,
-    group_receiver: mpsc::Receiver<SnapshotGroup>,
-    should_quit: Arc<AtomicBool>,
-    should_quit_poll_period: Duration,
-) -> Result<(), DBThreadError> {
-    defer! { trace!("terminated") }
-    trace!("started");
-    loop {
-        trace!("waiting for group");
-        if should_quit.load(Ordering::SeqCst) {
-            return Ok(());
-        }
-        let start = Instant::now();
-        // We wait with timeout to poll the should_quit periodically
-        match group_receiver.recv_timeout(should_quit_poll_period) {
-            Ok(group) => {
-                info!("waited {}s to get group", start.elapsed().as_secs_f64());
-                trace!("got group, saving");
-                if should_quit.load(Ordering::SeqCst) {
-                    return Ok(());
-                }
+                let short_id = snapshot_short_id(&id);
+                let pb = mpb_insert_after(
+                    &mpb,
+                    &main_pb,
+                    "   {spinner} saving {prefix}",
+                )
+                .with_prefix(short_id.clone());
                 let start = Instant::now();
-                cache
-                    .save_snapshot_group(group)
-                    .expect("unable to save snapshot group");
+                cache.save_snapshot(id, filetree)?;
+                pb.finish_and_clear();
+                mpb.remove(&pb);
+                main_pb.inc(1);
                 info!(
-                    "waited {}s to save group",
+                    "waited {}s to save snapshot",
                     start.elapsed().as_secs_f64()
                 );
-                trace!("group saved");
+                trace!("snapshot saved");
             }
             Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => {
@@ -670,9 +576,20 @@ fn new_pb(template: &str) -> ProgressBar {
 
 // This is necessary to avoid some weird redraws that happen
 // when enabling the tick thread before adding to the MultiProgress.
-fn mpb_add(mpb: &MultiProgress, template: &str) -> ProgressBar {
-    let pb =
-        mpb.add(ProgressBar::new_spinner().with_style(new_style(template)));
+fn mpb_insert_after(
+    mpb: &MultiProgress,
+    other_pb: &ProgressBar,
+    template: &str,
+) -> ProgressBar {
+    let pb = ProgressBar::new_spinner().with_style(new_style(template));
+    let pb = mpb.insert_after(other_pb, pb);
+    pb.enable_steady_tick(PB_TICK_INTERVAL);
+    pb
+}
+
+fn mpb_insert_end(mpb: &MultiProgress, template: &str) -> ProgressBar {
+    let pb = ProgressBar::new_spinner().with_style(new_style(template));
+    let pb = mpb.add(pb);
     pb.enable_steady_tick(PB_TICK_INTERVAL);
     pb
 }

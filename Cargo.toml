@@ -12,7 +12,6 @@ description = "This is like ncdu for a restic repository."
 
 [dependencies]
 anyhow = "1"
-scopeguard = "1"
 camino = "1"
 clap = { version = "4", features = ["derive"] }
 crossterm = "0.27"
@@ -23,11 +22,15 @@ indicatif = "0.17"
 log = "0.4"
 nix = { version = "0.28", features = ["process"] }
 ratatui = { version = "0.26", features = ["unstable-rendered-line-info", "unstable-widget-ref"] }
+refinery = { version = "0.8", features = ["rusqlite-bundled"]  }
 rusqlite = { version = "0.31", features = ["bundled", "functions", "trace"] }
+scopeguard = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1"
 unicode-segmentation = "1"
+
+uuid = { version = "1", features = ["v4"], optional = true }
 
 [lib]
 path = "src/lib.rs"
@@ -37,7 +40,7 @@ name = "redu"
 path = "src/main.rs"
 
 [features]
-bench = []
+bench = ["uuid"]
 
 [profile.release]
 codegen-units = 1
