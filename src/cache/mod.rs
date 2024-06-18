@@ -73,7 +73,11 @@ impl Cache {
             |ctx| {
                 let path = Utf8Path::new(ctx.get_raw(0).as_str()?);
                 let parent = path.parent().map(ToOwned::to_owned);
-                Ok(parent.map(|p| p.to_string()))
+                Ok(parent.and_then(|p| {
+                    let s = p.to_string();
+                    if s.is_empty() { None }
+                    else { Some(s) }
+                }))
             },
         )?;
         conn.profile(Some(|stmt, duration| {
