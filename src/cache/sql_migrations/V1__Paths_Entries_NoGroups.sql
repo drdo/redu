@@ -1,3 +1,5 @@
+DROP INDEX files_path_parent;
+DROP INDEX directories_path_parent;
 DROP TABLE snapshots;
 DROP TABLE files;
 DROP TABLE directories;
