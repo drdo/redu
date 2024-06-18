@@ -1,39 +1,39 @@
 #![feature(panic_update_hook)]
 
+use std::{fs, panic, thread};
 use std::borrow::Cow;
-use std::collections::HashSet;
 use std::io::stderr;
+use std::sync::{Arc, mpsc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
-use std::sync::{mpsc, Arc, Mutex};
 use std::thread::ScopedJoinHandle;
 use std::time::{Duration, Instant};
-use std::{fs, panic, thread};
-use anyhow::Context;
 
+use anyhow::Context;
 use camino::Utf8Path;
 use clap::{command, Parser};
 use crossterm::event::{KeyCode, KeyModifiers};
+use crossterm::ExecutableCommand;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen,
     LeaveAlternateScreen,
 };
-use crossterm::ExecutableCommand;
 use directories::ProjectDirs;
-use flexi_logger::{FileSpec, LogSpecification, Logger, WriteMode};
+use flexi_logger::{FileSpec, Logger, LogSpecification, WriteMode};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::{error, info, trace};
+use ratatui::{CompletedFrame, Terminal};
 use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::layout::Size;
 use ratatui::style::Stylize;
 use ratatui::widgets::WidgetRef;
-use ratatui::{CompletedFrame, Terminal};
-use redu::cache::filetree::FileTree;
-use redu::cache::{Cache, SnapshotGroup};
-use redu::restic::Restic;
-use redu::{cache, restic};
 use scopeguard::defer;
 use thiserror::Error;
+
+use redu::{cache, restic};
+use redu::cache::Cache;
+use redu::cache::filetree::FileTree;
+use redu::restic::Restic;
 
 use crate::ui::{Action, App, Event};
 
@@ -85,21 +85,6 @@ struct Cli {
             try lowering this."
     )]
     fetching_thread_count: usize,
-    #[arg(
-        long,
-        default_value_t = 8,
-        long_help = "
-            How big to make each group of snapshots.
-
-            A group is saved by merging the info of the snapshots in the group.
-            This is primarily to save disk space but it also speeds up
-            writing to the cache when doing a sync.
-
-            The disadvantage is that if we need to delete a snapshot because
-            it was removed from the repo then we must delete the entire group
-            that that snapshot belongs to."
-    )]
-    group_size: usize,
     #[arg(
         short = 'v',
         action = clap::ArgAction::Count,
@@ -178,7 +163,6 @@ fn main() -> anyhow::Result<()> {
         &restic,
         &mut cache,
         cli.fetching_thread_count,
-        cli.group_size,
     )?;
 
     // UI
@@ -267,7 +251,6 @@ fn sync_snapshots(
     restic: &Restic,
     cache: &mut Cache,
     fetching_thread_count: usize,
-    group_size: usize,
 ) -> anyhow::Result<()> {
     // Figure out what snapshots we need to fetch
     let missing_snapshots: Vec<Box<str>> = {
@@ -281,18 +264,17 @@ fn sync_snapshots(
         pb.finish();
 
         // Delete snapshots from the DB that were deleted on the repo
-        let groups_to_delete = cache
+        let snapshots_to_delete = cache
             .get_snapshots()?
             .into_iter()
             .filter(|snapshot| !repo_snapshots.contains(&snapshot))
-            .map(|snapshot_id| cache.get_snapshot_group(snapshot_id))
-            .collect::<Result<HashSet<u64>, rusqlite::Error>>()?;
-        if groups_to_delete.len() > 0 {
-            eprintln!("Need to delete {} group(s)", groups_to_delete.len());
+            .collect::<Vec<Box<str>>>();
+        if snapshots_to_delete.len() > 0 {
+            eprintln!("Need to delete {} snapshot(s)", snapshots_to_delete.len());
             let pb = new_pb(" {spinner} {wide_bar} [{pos}/{len}]");
-            pb.set_length(groups_to_delete.len() as u64);
-            for group in groups_to_delete {
-                cache.delete_group(group)?;
+            pb.set_length(snapshots_to_delete.len() as u64);
+            for snapshot in snapshots_to_delete {
+                cache.delete_snapshot(snapshot)?;
                 pb.inc(1);
             }
             pb.finish();
@@ -337,7 +319,7 @@ fn sync_snapshots(
         // prematurely terminate (when other threads get unrecoverable errors).
         let should_quit: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
 
-        // Channel to funnel snapshots from the fetching threads to the grouping thread
+        // Channel to funnel snapshots from the fetching threads to the db thread
         let (snapshot_sender, snapshot_receiver) =
             mpsc::sync_channel::<(Box<str>, FileTree)>(2);
 
@@ -359,30 +341,9 @@ fn sync_snapshots(
                 .map_err(anyhow::Error::from)
             }));
         }
-        // Drop the leftover channel so that the grouping thread
+        // Drop the leftover channel so that the db thread
         // can properly terminate when all snapshot senders are closed
         drop(snapshot_sender);
-
-        // Channel to funnel groups from the grouping thread to the db thread
-        let (group_sender, group_receiver) =
-            mpsc::sync_channel::<SnapshotGroup>(1);
-
-        // Start grouping thread
-        handles.push({
-            let should_quit = should_quit.clone();
-            spawn!("grouping", &scope, move || {
-                grouping_thread_body(
-                    group_size,
-                    snapshot_receiver,
-                    group_sender,
-                    pb,
-                    should_quit.clone(),
-                    SHOULD_QUIT_POLL_PERIOD,
-                )
-                .inspect_err(|_| should_quit.store(true, Ordering::SeqCst))
-                .map_err(anyhow::Error::from)
-            })
-        });
 
         // Start DB thread
         handles.push({
@@ -390,7 +351,7 @@ fn sync_snapshots(
             spawn!("db", &scope, move || {
                 db_thread_body(
                     cache,
-                    group_receiver,
+                    snapshot_receiver,
                     should_quit.clone(),
                     SHOULD_QUIT_POLL_PERIOD,
                 )
@@ -468,22 +429,19 @@ fn fetching_thread_body(
 }
 
 #[derive(Debug, Error)]
-#[error("error in grouping thread")]
-enum GroupingThreadError {
+#[error("error in db thread")]
+enum DBThreadError {
     CacheError(#[from] rusqlite::Error),
 }
 
-fn grouping_thread_body(
-    group_size: usize,
+fn db_thread_body(
+    cache: &mut Cache,
     snapshot_receiver: mpsc::Receiver<(Box<str>, FileTree)>,
-    group_sender: mpsc::SyncSender<SnapshotGroup>,
-    pb: ProgressBar,
     should_quit: Arc<AtomicBool>,
     should_quit_poll_period: Duration,
-) -> Result<(), GroupingThreadError> {
+) -> Result<(), DBThreadError> {
     defer! { trace!("terminated") }
     trace!("started");
-    let mut group = SnapshotGroup::new();
     loop {
         trace!("waiting for snapshot");
         if should_quit.load(Ordering::SeqCst) {
@@ -492,95 +450,19 @@ fn grouping_thread_body(
         let start = Instant::now();
         // We wait with timeout to poll the should_quit periodically
         match snapshot_receiver.recv_timeout(should_quit_poll_period) {
-            Ok((snapshot, filetree)) => {
-                let short_id = snapshot_short_id(&snapshot);
-                info!(
-                    "waited {}s to get snapshot ({short_id})",
-                    start.elapsed().as_secs_f64()
-                );
-                trace!("got snapshot ({short_id})");
-                if should_quit.load(Ordering::SeqCst) {
-                    return Ok(());
-                }
-                group.add_snapshot(snapshot.clone(), filetree);
-                pb.inc(1);
-                trace!("added snapshot ({short_id})");
-                if group.count() == group_size {
-                    trace!("group is full, sending");
-                    if should_quit.load(Ordering::SeqCst) {
-                        return Ok(());
-                    }
-                    let start = Instant::now();
-                    group_sender.send(group).unwrap();
-                    info!(
-                        "waited {}s to send group",
-                        start.elapsed().as_secs_f64()
-                    );
-                    trace!("sent group");
-                    group = SnapshotGroup::new();
-                }
-            }
-            Err(RecvTimeoutError::Timeout) => continue,
-            Err(RecvTimeoutError::Disconnected) => {
-                trace!("loop done");
-                break;
-            }
-        }
-    }
-    if group.count() > 0 {
-        trace!("sending leftover group");
-        if should_quit.load(Ordering::SeqCst) {
-            return Ok(());
-        }
-        let start = Instant::now();
-        group_sender.send(group).unwrap();
-        info!(
-            "waited {}s to send leftover group",
-            start.elapsed().as_secs_f64()
-        );
-        trace!("sent leftover group");
-    }
-    pb.finish_with_message("Done");
-    Ok(())
-}
-
-#[derive(Debug, Error)]
-#[error("error in db thread")]
-enum DBThreadError {
-    CacheError(#[from] rusqlite::Error),
-}
-
-fn db_thread_body(
-    cache: &mut Cache,
-    group_receiver: mpsc::Receiver<SnapshotGroup>,
-    should_quit: Arc<AtomicBool>,
-    should_quit_poll_period: Duration,
-) -> Result<(), DBThreadError> {
-    defer! { trace!("terminated") }
-    trace!("started");
-    loop {
-        trace!("waiting for group");
-        if should_quit.load(Ordering::SeqCst) {
-            return Ok(());
-        }
-        let start = Instant::now();
-        // We wait with timeout to poll the should_quit periodically
-        match group_receiver.recv_timeout(should_quit_poll_period) {
-            Ok(group) => {
-                info!("waited {}s to get group", start.elapsed().as_secs_f64());
-                trace!("got group, saving");
+            Ok((id, filetree)) => {
+                info!("waited {}s to get snapshot", start.elapsed().as_secs_f64());
+                trace!("got snapshot, saving");
                 if should_quit.load(Ordering::SeqCst) {
                     return Ok(());
                 }
                 let start = Instant::now();
-                cache
-                    .save_snapshot_group(group)
-                    .expect("unable to save snapshot group");
+                cache.save_snapshot(id, filetree)?;
                 info!(
-                    "waited {}s to save group",
+                    "waited {}s to save snapshot",
                     start.elapsed().as_secs_f64()
                 );
-                trace!("group saved");
+                trace!("snapshot saved");
             }
             Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => {

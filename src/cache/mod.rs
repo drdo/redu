@@ -1,10 +1,9 @@
-use std::cell::Cell;
 use std::path::Path;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use log::trace;
 use refinery::embed_migrations;
-use rusqlite::{Connection, params, Row};
+use rusqlite::{Connection, OptionalExtension, params, Row};
 use rusqlite::functions::FunctionFlags;
 use thiserror::Error;
 
@@ -48,7 +47,7 @@ impl Cache {
         Self::open_(file, refinery::Target::Latest)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "bench"))]
     pub fn open_with_target(
         file: &Path,
         migration_target: refinery::Target,
@@ -91,8 +90,8 @@ impl Cache {
 
     pub fn get_snapshots(&self) -> Result<Vec<Box<str>>, rusqlite::Error> {
         self.conn
-            .prepare("SELECT id FROM snapshots")?
-            .query_map([], |row| row.get("id"))?
+            .prepare("SELECT hash FROM snapshots")?
+            .query_map([], |row| row.get("hash"))?
             .collect()
     }
 
@@ -126,15 +125,9 @@ impl Cache {
         match path {
             None => {
                 let mut stmt = self.conn.prepare("\
-                    WITH
-                        fs AS (SELECT path, size, 0 as is_dir
-                               FROM files
-                               WHERE parent IS NULL),
-                        dirs AS (SELECT path, size, 1 as is_dir
-                                 FROM directories
-                                 WHERE parent IS NULL)
                     SELECT path, max(size) as size, max(is_dir) as is_dir
-                    FROM (SELECT * FROM fs UNION ALL SELECT * FROM dirs) AS entries
+                    FROM entries JOIN paths ON path_id = paths.id
+                    WHERE parent IS NULL
                     GROUP BY path
                     ORDER BY size DESC
                 ")?;
@@ -143,88 +136,65 @@ impl Cache {
             }
             Some(ref path) => {
                 let mut stmt = self.conn.prepare("\
-                    WITH
-                        fs AS (SELECT path, size, 0 as is_dir
-                               FROM files
-                               WHERE parent = ?),
-                        dirs AS (SELECT path, size, 1 as is_dir
-                                 FROM directories
-                                 WHERE parent = ?)
                     SELECT path, max(size) as size, max(is_dir) as is_dir
-                    FROM (SELECT * FROM fs UNION ALL SELECT * FROM dirs) AS entries
+                    FROM entries JOIN paths ON path_id = paths.id
+                    WHERE parent = ?
                     GROUP BY path
                     ORDER BY size DESC
                 ")?;
-                let path_str = path.as_ref().as_str();
-                let rows = stmt.query_map([path_str, path_str], aux)?;
+                let rows = stmt.query_map([path.as_ref().as_str()], aux)?;
                 rows.collect()
             }
         }
     }
 
-    pub fn save_snapshot_group(
+    pub fn save_snapshot(
         &mut self,
-        group: SnapshotGroup,
+        hash: impl AsRef<str>,
+        filetree: FileTree,
     ) -> Result<(), rusqlite::Error> {
+        let id = hash.as_ref();
         let tx = self.conn.transaction()?;
         {
-            let group_id: u64 = tx
-                .query_row_and_then(
-                    r#"SELECT max("group")+1 FROM snapshots"#,
-                    [],
-                    |row| row.get::<usize, Option<u64>>(0),
-                )?
-                .unwrap_or(0);
-            let mut snapshot_stmt = tx.prepare(
-                r#"
-                INSERT INTO snapshots (id, "group")
-                VALUES (?, ?)"#,
+            let snapshot_id = tx.query_row(
+                "INSERT INTO snapshots (hash) VALUES (?) RETURNING (id)",
+                [hash.as_ref()],
+                |row| row.get::<usize, u64>(0),
             )?;
-            let mut file_stmt = tx.prepare(
-                "
-                INSERT INTO files (snapshot_group, path, size)
-                VALUES (?, ?, ?)",
-            )?;
-            let mut dir_stmt = tx.prepare(
-                "\
-                INSERT INTO directories (snapshot_group, path, size)
-                VALUES (?, ?, ?)",
-            )?;
-
-            for id in group.snapshots.iter() {
-                snapshot_stmt.execute(params![id, group_id])?;
-            }
-
-            for entry in group.filetree.take().iter() {
-                match entry {
-                    Entry::File(File { path, size }) => file_stmt
-                        .execute(params![group_id, path.into_string(), size])?,
-                    Entry::Directory(Directory { path, size }) => dir_stmt
-                        .execute(params![group_id, path.into_string(), size])?,
+            let mut paths_stmt = tx.prepare("\
+                INSERT INTO paths (path)
+                VALUES (?)
+                ON CONFLICT (path) DO NOTHING
+            ")?;
+            let mut entries_stmt = tx.prepare("\
+                INSERT INTO entries (snapshot_id, path_id, size, is_dir)
+                VALUES (?, (SELECT id FROM paths WHERE path = ?), ?, ?)
+            ")?;
+            for entry in filetree.iter() {
+                let (path, size, is_dir) = match entry {
+                    Entry::File(File { path, size }) => (path, size, false),
+                    Entry::Directory(Directory { path, size }) => (path, size, true),
                 };
+                paths_stmt.execute([path.as_str()])?;
+                entries_stmt.execute(params![snapshot_id, path.as_str(), size, is_dir])?;
             }
         }
         tx.commit()
     }
 
-    pub fn get_snapshot_group(
-        &self,
-        id: impl AsRef<str>,
-    ) -> Result<u64, rusqlite::Error> {
-        self.conn.query_row_and_then(
-            r#"SELECT "group" FROM snapshots WHERE id = ?"#,
-            [id.as_ref()],
-            |row| row.get(0),
-        )
-    }
-
-    pub fn delete_group(&mut self, id: u64) -> Result<(), rusqlite::Error> {
+    pub fn delete_snapshot(&mut self, hash: impl AsRef<str>) -> Result<(), rusqlite::Error> {
+        let hash = hash.as_ref();
         let tx = self.conn.transaction()?;
-        tx.execute(r#"DELETE FROM snapshots WHERE "group" = ?"#, [id])?;
-        tx.execute(r#"DELETE FROM files WHERE snapshot_group = ?"#, [id])?;
-        tx.execute(r#"DELETE FROM directories WHERE snapshot_group = ?"#, [
-            id,
-        ])?;
+        if let Some(snapshot_id) = tx
+            .query_row(
+                "DELETE FROM snapshots WHERE hash = ? RETURNING (id)",
+                [hash],
+                |row| row.get::<usize, u64>(0),
+            )
+            .optional()?
+        {
+            tx.execute("DELETE FROM entries WHERE snapshot_id = ?", [snapshot_id])?;
+        }
         tx.commit()
     }
 
@@ -257,28 +227,5 @@ impl Cache {
 
     pub fn delete_all_marks(&mut self) -> Result<usize, rusqlite::Error> {
         self.conn.execute("DELETE FROM marks", [])
-    }
-}
-
-pub struct SnapshotGroup {
-    snapshots: Vec<Box<str>>,
-    filetree: Cell<FileTree>,
-}
-
-impl SnapshotGroup {
-    pub fn new() -> Self {
-        SnapshotGroup {
-            snapshots: Vec::new(),
-            filetree: Cell::new(FileTree::new()),
-        }
-    }
-
-    pub fn add_snapshot(&mut self, id: Box<str>, filetree: FileTree) {
-        self.snapshots.push(id);
-        self.filetree.replace(self.filetree.take().merge(filetree));
-    }
-
-    pub fn count(&self) -> usize {
-        self.snapshots.len()
     }
 }
