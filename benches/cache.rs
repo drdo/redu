@@ -1,7 +1,6 @@
 use std::cell::Cell;
 
-use criterion::{black_box, Criterion, criterion_group, criterion_main};
-
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use redu::cache::tests::*;
 
 pub fn criterion_benchmark(c: &mut Criterion) {
@@ -13,14 +12,18 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         b.iter(move || filetree0.take().merge(black_box(filetree1.take())));
     });
 
-    c.bench_function("create and save snapshot", |b| { with_cache_open(|mut cache| {
-        b.iter(move || {
-            cache.save_snapshot(
-                "foo",
-                generate_filetree(black_box(6), black_box(12)),
-            ).unwrap();
-        });
-    })});
+    c.bench_function("create and save snapshot", |b| {
+        with_cache_open(|mut cache| {
+            b.iter(move || {
+                cache
+                    .save_snapshot(
+                        "foo",
+                        generate_filetree(black_box(6), black_box(12)),
+                    )
+                    .unwrap();
+            });
+        })
+    });
 }
 
 criterion_group! {

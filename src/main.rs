@@ -1,39 +1,38 @@
 #![feature(panic_update_hook)]
 
-use std::{fs, panic, thread};
 use std::borrow::Cow;
 use std::io::stderr;
-use std::sync::{Arc, mpsc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread::ScopedJoinHandle;
 use std::time::{Duration, Instant};
+use std::{fs, panic, thread};
 
 use anyhow::Context;
 use camino::Utf8Path;
 use clap::{command, Parser};
 use crossterm::event::{KeyCode, KeyModifiers};
-use crossterm::ExecutableCommand;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen,
     LeaveAlternateScreen,
 };
+use crossterm::ExecutableCommand;
 use directories::ProjectDirs;
-use flexi_logger::{FileSpec, Logger, LogSpecification, WriteMode};
+use flexi_logger::{FileSpec, LogSpecification, Logger, WriteMode};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::{error, info, trace};
-use ratatui::{CompletedFrame, Terminal};
 use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::layout::Size;
 use ratatui::style::Stylize;
 use ratatui::widgets::WidgetRef;
+use ratatui::{CompletedFrame, Terminal};
+use redu::cache::filetree::FileTree;
+use redu::cache::Cache;
+use redu::restic::Restic;
+use redu::{cache, restic};
 use scopeguard::defer;
 use thiserror::Error;
-
-use redu::{cache, restic};
-use redu::cache::Cache;
-use redu::cache::filetree::FileTree;
-use redu::restic::Restic;
 
 use crate::ui::{Action, App, Event};
 
@@ -168,11 +167,7 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    sync_snapshots(
-        &restic,
-        &mut cache,
-        cli.fetching_thread_count,
-    )?;
+    sync_snapshots(&restic, &mut cache, cli.fetching_thread_count)?;
 
     // UI
     stderr().execute(EnterAlternateScreen)?;
@@ -279,7 +274,10 @@ fn sync_snapshots(
             .filter(|snapshot| !repo_snapshots.contains(&snapshot))
             .collect::<Vec<Box<str>>>();
         if snapshots_to_delete.len() > 0 {
-            eprintln!("Need to delete {} snapshot(s)", snapshots_to_delete.len());
+            eprintln!(
+                "Need to delete {} snapshot(s)",
+                snapshots_to_delete.len()
+            );
             let pb = new_pb(" {spinner} {wide_bar} [{pos}/{len}]");
             pb.set_length(snapshots_to_delete.len() as u64);
             for snapshot in snapshots_to_delete {
@@ -308,7 +306,8 @@ fn sync_snapshots(
 
     // Create progress indicators
     let mpb = MultiProgress::new();
-    let pb = mpb_insert_end(&mpb, " {spinner} {prefix} {wide_bar} [{pos}/{len}] ");
+    let pb =
+        mpb_insert_end(&mpb, " {spinner} {prefix} {wide_bar} [{pos}/{len}] ");
     pb.set_prefix("Fetching snapshots");
     pb.set_length(total_missing_snapshots as u64);
 
@@ -397,8 +396,9 @@ fn fetching_thread_body(
     trace!("started");
     while let Some(snapshot) = missing_queue.pop() {
         let short_id = snapshot_short_id(&snapshot);
-        let pb = mpb_insert_end(&mpb, "   {spinner} fetching {prefix}: starting up")
-            .with_prefix(short_id.clone());
+        let pb =
+            mpb_insert_end(&mpb, "   {spinner} fetching {prefix}: starting up")
+                .with_prefix(short_id.clone());
         let mut filetree = FileTree::new();
         let files = restic.ls(&snapshot)?;
         trace!("started fetching snapshot ({short_id})");
@@ -464,14 +464,21 @@ fn db_thread_body(
         // We wait with timeout to poll the should_quit periodically
         match snapshot_receiver.recv_timeout(should_quit_poll_period) {
             Ok((id, filetree)) => {
-                info!("waited {}s to get snapshot", start.elapsed().as_secs_f64());
+                info!(
+                    "waited {}s to get snapshot",
+                    start.elapsed().as_secs_f64()
+                );
                 trace!("got snapshot, saving");
                 if should_quit.load(Ordering::SeqCst) {
                     return Ok(());
                 }
                 let short_id = snapshot_short_id(&id);
-                let pb = mpb_insert_after(&mpb, &main_pb, "   {spinner} saving {prefix}")
-                    .with_prefix(short_id.clone());
+                let pb = mpb_insert_after(
+                    &mpb,
+                    &main_pb,
+                    "   {spinner} saving {prefix}",
+                )
+                .with_prefix(short_id.clone());
                 let start = Instant::now();
                 cache.save_snapshot(id, filetree)?;
                 pb.finish_and_clear();
@@ -569,7 +576,11 @@ fn new_pb(template: &str) -> ProgressBar {
 
 // This is necessary to avoid some weird redraws that happen
 // when enabling the tick thread before adding to the MultiProgress.
-fn mpb_insert_after(mpb: &MultiProgress, other_pb: &ProgressBar, template: &str) -> ProgressBar {
+fn mpb_insert_after(
+    mpb: &MultiProgress,
+    other_pb: &ProgressBar,
+    template: &str,
+) -> ProgressBar {
     let pb = ProgressBar::new_spinner().with_style(new_style(template));
     let pb = mpb.insert_after(other_pb, pb);
     pb.enable_steady_tick(PB_TICK_INTERVAL);

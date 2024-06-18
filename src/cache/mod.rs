@@ -3,15 +3,16 @@ use std::path::Path;
 use camino::{Utf8Path, Utf8PathBuf};
 use log::trace;
 use refinery::{embed_migrations, Migration, Runner, Target};
-use rusqlite::{Connection, OptionalExtension, params, Row};
 use rusqlite::functions::FunctionFlags;
+use rusqlite::{params, Connection, OptionalExtension, Row};
 use thiserror::Error;
 
 use crate::cache::filetree::FileTree;
 use crate::types::{Directory, Entry, File};
 
 pub mod filetree;
-#[cfg(any(test, feature = "bench"))] pub mod tests;
+#[cfg(any(test, feature = "bench"))]
+pub mod tests;
 
 embed_migrations!("src/cache/sql_migrations");
 
@@ -91,8 +92,11 @@ impl Cache {
                 let parent = path.parent().map(ToOwned::to_owned);
                 Ok(parent.and_then(|p| {
                     let s = p.to_string();
-                    if s.is_empty() { None }
-                    else { Some(s) }
+                    if s.is_empty() {
+                        None
+                    } else {
+                        Some(s)
+                    }
                 }))
             },
         )?;
@@ -101,8 +105,8 @@ impl Cache {
         }));
         let runner = migrations::runner().set_target(migration_target);
         let need_to_migrate = {
-            let all_migrations = runner.get_migrations()
-                .iter().map(Migration::version);
+            let all_migrations =
+                runner.get_migrations().iter().map(Migration::version);
             let target_version = match migration_target {
                 Target::Latest => all_migrations.max(),
                 Target::Fake => all_migrations.max(),
@@ -122,9 +126,12 @@ impl Cache {
                 }
             };
             target_version
-                .map(|t| applied_migrations
-                    .iter()
-                    .find(|m| t == m.version()).is_none())
+                .map(|t| {
+                    applied_migrations
+                        .iter()
+                        .find(|m| t == m.version())
+                        .is_none()
+                })
                 .unwrap_or(false)
         };
         Ok(Migrator { conn, runner, need_to_migrate })
@@ -166,24 +173,24 @@ impl Cache {
 
         match path {
             None => {
-                let mut stmt = self.conn.prepare("\
-                    SELECT path, max(size) as size, max(is_dir) as is_dir
-                    FROM entries JOIN paths ON path_id = paths.id
-                    WHERE parent IS NULL
-                    GROUP BY path
-                    ORDER BY size DESC
-                ")?;
+                let mut stmt = self.conn.prepare(
+                    "SELECT path, max(size) as size, max(is_dir) as is_dir
+                     FROM entries JOIN paths ON path_id = paths.id
+                     WHERE parent IS NULL
+                     GROUP BY path
+                     ORDER BY size DESC",
+                )?;
                 let rows = stmt.query_map([], aux)?;
                 rows.collect()
             }
             Some(ref path) => {
-                let mut stmt = self.conn.prepare("\
-                    SELECT path, max(size) as size, max(is_dir) as is_dir
-                    FROM entries JOIN paths ON path_id = paths.id
-                    WHERE parent = ?
-                    GROUP BY path
-                    ORDER BY size DESC
-                ")?;
+                let mut stmt = self.conn.prepare(
+                    "SELECT path, max(size) as size, max(is_dir) as is_dir
+                     FROM entries JOIN paths ON path_id = paths.id
+                     WHERE parent = ?
+                     GROUP BY path
+                     ORDER BY size DESC",
+                )?;
                 let rows = stmt.query_map([path.as_ref().as_str()], aux)?;
                 rows.collect()
             }
@@ -202,28 +209,37 @@ impl Cache {
                 [hash.as_ref()],
                 |row| row.get::<usize, u64>(0),
             )?;
-            let mut paths_stmt = tx.prepare("\
-                INSERT INTO paths (path)
-                VALUES (?)
-                ON CONFLICT (path) DO NOTHING
-            ")?;
-            let mut entries_stmt = tx.prepare("\
-                INSERT INTO entries (snapshot_id, path_id, size, is_dir)
-                VALUES (?, (SELECT id FROM paths WHERE path = ?), ?, ?)
-            ")?;
+            let mut paths_stmt = tx.prepare(
+                "INSERT INTO paths (path)
+                 VALUES (?)
+                 ON CONFLICT (path) DO NOTHING",
+            )?;
+            let mut entries_stmt = tx.prepare(
+                "INSERT INTO entries (snapshot_id, path_id, size, is_dir)
+                 VALUES (?, (SELECT id FROM paths WHERE path = ?), ?, ?)",
+            )?;
             for entry in filetree.iter() {
                 let (path, size, is_dir) = match entry {
                     Entry::File(File { path, size }) => (path, size, false),
-                    Entry::Directory(Directory { path, size }) => (path, size, true),
+                    Entry::Directory(Directory { path, size }) =>
+                        (path, size, true),
                 };
                 paths_stmt.execute([path.as_str()])?;
-                entries_stmt.execute(params![snapshot_id, path.as_str(), size, is_dir])?;
+                entries_stmt.execute(params![
+                    snapshot_id,
+                    path.as_str(),
+                    size,
+                    is_dir
+                ])?;
             }
         }
         tx.commit()
     }
 
-    pub fn delete_snapshot(&mut self, hash: impl AsRef<str>) -> Result<(), rusqlite::Error> {
+    pub fn delete_snapshot(
+        &mut self,
+        hash: impl AsRef<str>,
+    ) -> Result<(), rusqlite::Error> {
         let hash = hash.as_ref();
         let tx = self.conn.transaction()?;
         if let Some(snapshot_id) = tx
@@ -234,7 +250,9 @@ impl Cache {
             )
             .optional()?
         {
-            tx.execute("DELETE FROM entries WHERE snapshot_id = ?", [snapshot_id])?;
+            tx.execute("DELETE FROM entries WHERE snapshot_id = ?", [
+                snapshot_id,
+            ])?;
         }
         tx.commit()
     }

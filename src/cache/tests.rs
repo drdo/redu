@@ -6,8 +6,8 @@ use refinery::Target;
 use scopeguard::defer;
 use uuid::Uuid;
 
-use crate::cache::Cache;
 use crate::cache::filetree::{EntryExistsError, FileTree};
+use crate::cache::Cache;
 use crate::types::{Directory, Entry, File};
 
 pub fn with_cache_open_with_target(
@@ -28,10 +28,7 @@ pub fn with_cache_open(body: impl FnOnce(Cache)) {
 
 pub fn path_parent(path: &Utf8Path) -> Option<Utf8PathBuf> {
     let parent = path.parent().map(ToOwned::to_owned);
-    parent.and_then(|p| {
-        if p.as_str().is_empty() { None }
-        else { Some(p) }
-    })
+    parent.and_then(|p| if p.as_str().is_empty() { None } else { Some(p) })
 }
 
 pub struct PathGenerator {
@@ -67,10 +64,7 @@ impl Iterator for PathGenerator {
     }
 }
 
-pub fn generate_filetree(
-    depth: usize,
-    branching_factor: usize,
-) -> FileTree {
+pub fn generate_filetree(depth: usize, branching_factor: usize) -> FileTree {
     let mut filetree = FileTree::new();
     for path in PathGenerator::new(depth, branching_factor) {
         filetree.insert(&path, 1).unwrap();
@@ -208,32 +202,41 @@ fn cache_snapshots_entries() {
         fn test_snapshots(cache: &Cache, hashes: Vec<&str>) {
             let mut db_snapshots = cache.get_snapshots().unwrap();
             db_snapshots.sort();
-            let mut hashes = hashes.into_iter().map(Box::from).collect::<Vec<Box<str>>>();
+            let mut hashes =
+                hashes.into_iter().map(Box::from).collect::<Vec<Box<str>>>();
             hashes.sort();
             assert_eq!(db_snapshots, hashes);
         }
- 
+
         fn test_max_file_sizes(
             cache: &Cache,
             filetree: FileTree,
-            path: Option<&str>
+            path: Option<&str>,
         ) {
             let mut db_entries = cache.get_max_file_sizes(path).unwrap();
             db_entries.sort_by_key(|e| e.path().to_string());
             let mut entries = filetree
                 .iter()
-                .filter(|e| path_parent(e.path()) == path.map(|s| Utf8PathBuf::from(s)))
+                .filter(|e| {
+                    path_parent(e.path()) == path.map(|s| Utf8PathBuf::from(s))
+                })
                 .map(|e| {
                     if let Some(parent) = path {
                         match e {
                             Entry::Directory(Directory { path, size }) =>
                                 Entry::Directory(Directory {
-                                    path: path.strip_prefix(parent).unwrap().to_owned(),
+                                    path: path
+                                        .strip_prefix(parent)
+                                        .unwrap()
+                                        .to_owned(),
                                     size,
                                 }),
                             Entry::File(File { path, size }) =>
                                 Entry::File(File {
-                                    path: path.strip_prefix(parent).unwrap().to_owned(),
+                                    path: path
+                                        .strip_prefix(parent)
+                                        .unwrap()
+                                        .to_owned(),
                                     size,
                                 }),
                         }
@@ -269,23 +272,20 @@ fn cache_snapshots_entries() {
         test_snapshots(&cache, vec!["foo", "bar", "wat"]);
         test_entries(
             &cache,
-            example_tree_0().merge(example_tree_1()).merge(example_tree_2())
-        ); 
+            example_tree_0().merge(example_tree_1()).merge(example_tree_2()),
+        );
 
         // Deleting a non-existent snapshot does nothing
         cache.delete_snapshot("non-existent").unwrap();
         test_snapshots(&cache, vec!["foo", "bar", "wat"]);
         test_entries(
             &cache,
-            example_tree_0().merge(example_tree_1()).merge(example_tree_2())
+            example_tree_0().merge(example_tree_1()).merge(example_tree_2()),
         );
-        
+
         // Remove bar
         cache.delete_snapshot("bar").unwrap();
         test_snapshots(&cache, vec!["foo", "wat"]);
-        test_entries(
-            &cache,
-            example_tree_0().merge(example_tree_2())
-        );
+        test_entries(&cache, example_tree_0().merge(example_tree_2()));
     });
 }
