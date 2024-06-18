@@ -153,7 +153,6 @@ impl Cache {
         hash: impl AsRef<str>,
         filetree: FileTree,
     ) -> Result<(), rusqlite::Error> {
-        let id = hash.as_ref();
         let tx = self.conn.transaction()?;
         {
             let snapshot_id = tx.query_row(
