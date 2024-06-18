@@ -12,6 +12,7 @@ use crate::cache::filetree::FileTree;
 use crate::types::{Directory, Entry, File};
 
 pub mod filetree;
+#[cfg(any(test, feature = "bench"))] pub mod tests;
 
 embed_migrations!("src/cache/sql_migrations");
 
@@ -275,56 +276,5 @@ impl SnapshotGroup {
 
     pub fn count(&self) -> usize {
         self.snapshots.len()
-    }
-}
-
-#[cfg(any(test, feature = "bench"))]
-pub mod tests {
-    use camino::Utf8PathBuf;
-
-    use super::filetree::FileTree;
-
-    pub struct PathGenerator {
-        branching_factor: usize,
-        state: Vec<(usize, Utf8PathBuf, usize)>,
-    }
-
-    impl PathGenerator {
-        pub fn new(depth: usize, branching_factor: usize) -> Self {
-            let mut state = Vec::with_capacity(depth);
-            state.push((depth, Utf8PathBuf::new(), 0));
-            PathGenerator { branching_factor, state }
-        }
-    }
-
-    impl Iterator for PathGenerator {
-        type Item = Utf8PathBuf;
-
-        fn next(&mut self) -> Option<Self::Item> {
-            loop {
-                let (depth, prefix, child) = self.state.pop()?;
-                if child < self.branching_factor {
-                    let mut new_prefix = prefix.clone();
-                    new_prefix.push(Utf8PathBuf::from(child.to_string()));
-                    self.state.push((depth, prefix, child + 1));
-                    if depth == 1 {
-                        break (Some(new_prefix));
-                    } else {
-                        self.state.push((depth - 1, new_prefix, 0));
-                    }
-                }
-            }
-        }
-    }
-
-    pub fn generate_filetree(
-        depth: usize,
-        branching_factor: usize,
-    ) -> FileTree {
-        let mut filetree = FileTree::new();
-        for path in PathGenerator::new(depth, branching_factor) {
-            filetree.insert(&path, 1).unwrap();
-        }
-        filetree
     }
 }
