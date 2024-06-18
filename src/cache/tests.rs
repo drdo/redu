@@ -10,12 +10,16 @@ use crate::cache::Cache;
 use crate::cache::filetree::{EntryExistsError, FileTree};
 use crate::types::{Directory, Entry, File};
 
-pub fn with_cache_open_with_target(migration_target: Target, body: impl FnOnce(Cache)) {
+pub fn with_cache_open_with_target(
+    migration_target: Target,
+    body: impl FnOnce(Cache),
+) {
     let mut file = std::env::temp_dir();
     file.push(Uuid::new_v4().to_string());
 
     defer! { fs::remove_file(&file).unwrap(); }
-    body(Cache::open_with_target(&file, migration_target).unwrap());
+    let migrator = Cache::open_with_target(&file, migration_target).unwrap();
+    body(migrator.migrate().unwrap());
 }
 
 pub fn with_cache_open(body: impl FnOnce(Cache)) {
@@ -207,7 +211,7 @@ fn cache_snapshots_entries() {
             let mut hashes = hashes.into_iter().map(Box::from).collect::<Vec<Box<str>>>();
             hashes.sort();
             assert_eq!(db_snapshots, hashes);
-        };
+        }
  
         fn test_max_file_sizes(
             cache: &Cache,
@@ -241,7 +245,7 @@ fn cache_snapshots_entries() {
             entries.sort_by_key(|e| Reverse(e.size()));
             entries.sort_by_key(|e| e.path().to_string());
             assert_eq!(db_entries, entries);
-        };
+        }
 
         cache.save_snapshot("foo", example_tree_0()).unwrap();
         cache.save_snapshot("bar", example_tree_1()).unwrap();
@@ -260,7 +264,7 @@ fn cache_snapshots_entries() {
             test_max_file_sizes(cache, filetree.clone(), Some("b/2"));
             test_max_file_sizes(cache, filetree.clone(), Some("something"));
             test_max_file_sizes(cache, filetree.clone(), Some("a/something"));
-        };
+        }
 
         test_snapshots(&cache, vec!["foo", "bar", "wat"]);
         test_entries(
