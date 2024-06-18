@@ -399,9 +399,6 @@ fn sync_snapshots(
             })
         });
 
-        // Drop the senders that weren't moved into threads so that
-        // the receivers can detect when everyone is done
-
         for handle in handles {
             handle.join().unwrap()?
         }
