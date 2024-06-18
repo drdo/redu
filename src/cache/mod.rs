@@ -2,7 +2,7 @@ use std::path::Path;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use log::trace;
-use refinery::embed_migrations;
+use refinery::{embed_migrations, Migration, Runner, Target};
 use rusqlite::{Connection, OptionalExtension, params, Row};
 use rusqlite::functions::FunctionFlags;
 use thiserror::Error;
@@ -42,23 +42,40 @@ pub enum OpenError {
     Migration(#[from] refinery::Error),
 }
 
+pub struct Migrator {
+    conn: Connection,
+    runner: Runner,
+    need_to_migrate: bool,
+}
+
+impl Migrator {
+    pub fn migrate(mut self) -> Result<Cache, refinery::Error> {
+        self.runner.run(&mut self.conn)?;
+        Ok(Cache { conn: self.conn })
+    }
+    
+    pub fn need_to_migrate(&self) -> bool {
+        self.need_to_migrate
+    }
+}
+
 impl Cache {
-    pub fn open(file: &Path) -> Result<Self, OpenError> {
-        Self::open_(file, refinery::Target::Latest)
+    pub fn open(file: &Path) -> Result<Migrator, OpenError> {
+        Self::open_(file, Target::Latest)
     }
 
     #[cfg(any(test, feature = "bench"))]
     pub fn open_with_target(
         file: &Path,
-        migration_target: refinery::Target,
-    ) -> Result<Self, OpenError> {
+        migration_target: Target,
+    ) -> Result<Migrator, OpenError> {
         Self::open_(file, migration_target)
     }
 
     fn open_(
         file: &Path,
-        migration_target: refinery::Target,
-    ) -> Result<Self, OpenError> {
+        migration_target: Target,
+    ) -> Result<Migrator, OpenError> {
         let mut conn = Connection::open(&file)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
@@ -82,10 +99,24 @@ impl Cache {
         conn.profile(Some(|stmt, duration| {
             trace!("SQL {stmt} (took {duration:#?})")
         }));
-        migrations::runner()
-            .set_target(migration_target)
-            .run(&mut conn)?;
-        Ok(Cache { conn })
+        let runner = migrations::runner().set_target(migration_target);
+        let need_to_migrate = {
+            let all_migrations = runner.get_migrations()
+                .iter().map(Migration::version);
+            let target_version = match migration_target {
+                Target::Latest => all_migrations.max(),
+                Target::Fake => all_migrations.max(),
+                Target::Version(v) => Some(v),
+                Target::FakeVersion(v) => Some(v),
+            };
+            let applied_migrations = runner.get_applied_migrations(&mut conn)?;
+            target_version
+                .map(|t| applied_migrations
+                    .iter()
+                    .find(|m| t == m.version()).is_none())
+                .unwrap_or(false)
+        };
+        Ok(Migrator { conn, runner, need_to_migrate })
     }
 
     pub fn get_snapshots(&self) -> Result<Vec<Box<str>>, rusqlite::Error> {

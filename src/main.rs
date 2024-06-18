@@ -146,7 +146,7 @@ fn main() -> anyhow::Result<()> {
         ));
 
         eprintln!("Using cache file {cache_file:#?}");
-        match Cache::open(&cache_file) {
+        let migrator = match Cache::open(&cache_file) {
             Err(e) if cache::is_corruption_error(&e) => {
                 eprintln!("### Cache file corruption detected! Deleting and recreating. ###");
                 // Try to delete and reopen
@@ -155,8 +155,17 @@ fn main() -> anyhow::Result<()> {
                 eprintln!("Corrupted cache file deleted");
                 Cache::open(&cache_file)
             }
-            x => x,
-        }.context("unable to open cache file")?
+            migrator => migrator,
+        }.context("unable to open cache file")?;
+ 
+        if migrator.need_to_migrate() {
+            let pb = new_pb(" {spinner} Upgrading cache version");
+            let cache = migrator.migrate()?;
+            pb.finish();
+            cache
+        } else {
+            migrator.migrate()?
+        }
     };
 
     sync_snapshots(
