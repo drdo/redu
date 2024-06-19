@@ -107,6 +107,12 @@ fn example_tree_2() -> FileTree {
 }
 
 #[test]
+fn filetree_iter_empty() {
+    let mut filetree = FileTree::new();
+    assert_eq!(filetree.iter().next(), None);
+}
+
+#[test]
 fn insert_uniques_0() {
     let mut entries = example_tree_0().iter().collect::<Vec<_>>();
     sort_entries(&mut entries);
