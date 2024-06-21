@@ -1,4 +1,5 @@
 use std::cmp::Reverse;
+use std::convert::Infallible;
 use std::fs;
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -6,9 +7,8 @@ use refinery::Target;
 use scopeguard::defer;
 use uuid::Uuid;
 
-use crate::cache::filetree::{EntryExistsError, FileTree};
 use crate::cache::Cache;
-use crate::types::{Directory, Entry, File};
+use crate::cache::filetree::{InsertError, SizeTree};
 
 pub fn with_cache_open_with_target(
     migration_target: Target,
@@ -64,119 +64,151 @@ impl Iterator for PathGenerator {
     }
 }
 
-pub fn generate_filetree(depth: usize, branching_factor: usize) -> FileTree {
-    let mut filetree = FileTree::new();
+pub fn generate_sizetree(depth: usize, branching_factor: usize) -> SizeTree {
+    let mut sizetree = SizeTree::new();
     for path in PathGenerator::new(depth, branching_factor) {
-        filetree.insert(&path, 1).unwrap();
+        sizetree.insert(path.components(), 1).unwrap();
     }
-    filetree
+    sizetree
 }
 
-fn sort_entries(entries: &mut Vec<Entry>) {
-    entries.sort_unstable_by(|e0, e1| e0.path().cmp(e1.path()));
+fn sort_entries(entries: &mut Vec<(Vec<&str>, usize, bool)>) {
+    entries.sort_unstable_by(|e0, e1| e0.0.cmp(&e1.0));
 }
 
-fn example_tree_0() -> FileTree {
-    let mut filetree = FileTree::new();
-    assert_eq!(filetree.insert("a/0/x".into(), 1), Ok(()));
-    assert_eq!(filetree.insert("a/0/y".into(), 2), Ok(()));
-    assert_eq!(filetree.insert("a/1/x/0".into(), 7), Ok(()));
-    assert_eq!(filetree.insert("a/0/z/0".into(), 1), Ok(()));
-    assert_eq!(filetree.insert("a/1/x/1".into(), 2), Ok(()));
-    filetree
+fn to_sorted_entries(tree: &SizeTree) -> Vec<(Vec<&str>, usize, bool)> {
+    let mut entries = Vec::new();
+    tree.0.traverse_with_context(|context, component, size, is_dir| {
+        let mut path = Vec::from(context);
+        path.push(component);
+        entries.push((path, *size, is_dir));
+        Ok::<&str, Infallible>(component)
+    }).unwrap();
+    sort_entries(&mut entries);
+    entries
 }
 
-fn example_tree_1() -> FileTree {
-    let mut filetree = FileTree::new();
-    assert_eq!(filetree.insert("a/0/x".into(), 3), Ok(()));
-    assert_eq!(filetree.insert("a/0/y".into(), 2), Ok(()));
-    assert_eq!(filetree.insert("a/2/x/0".into(), 7), Ok(()));
-    assert_eq!(filetree.insert("a/0/z/0".into(), 9), Ok(()));
-    assert_eq!(filetree.insert("a/1/x/1".into(), 1), Ok(()));
-    filetree
+fn example_tree_0() -> SizeTree {
+    let mut sizetree = SizeTree::new();
+    assert_eq!(sizetree.insert(["a", "0", "x"], 1), Ok(()));
+    assert_eq!(sizetree.insert(["a", "0", "y"], 2), Ok(()));
+    assert_eq!(sizetree.insert(["a", "1", "x", "0"], 7), Ok(()));
+    assert_eq!(sizetree.insert(["a", "0", "z", "0"], 1), Ok(()));
+    assert_eq!(sizetree.insert(["a", "1", "x", "1"], 2), Ok(()));
+    sizetree
 }
 
-fn example_tree_2() -> FileTree {
-    let mut filetree = FileTree::new();
-    assert_eq!(filetree.insert("b/0/x".into(), 3), Ok(()));
-    assert_eq!(filetree.insert("b/0/y".into(), 2), Ok(()));
-    assert_eq!(filetree.insert("a/2/x/0".into(), 7), Ok(()));
-    assert_eq!(filetree.insert("b/0/z/0".into(), 9), Ok(()));
-    assert_eq!(filetree.insert("a/1/x/1".into(), 1), Ok(()));
-    filetree
+fn example_tree_1() -> SizeTree {
+    let mut sizetree = SizeTree::new();
+    assert_eq!(sizetree.insert(["a", "0", "x"], 3), Ok(()));
+    assert_eq!(sizetree.insert(["a", "0", "y"], 2), Ok(()));
+    assert_eq!(sizetree.insert(["a", "2", "x", "0"], 7), Ok(()));
+    assert_eq!(sizetree.insert(["a", "0", "z", "0"], 9), Ok(()));
+    assert_eq!(sizetree.insert(["a", "1", "x", "1"], 1), Ok(()));
+    sizetree
+}
+
+fn example_tree_2() -> SizeTree {
+    let mut sizetree = SizeTree::new();
+    assert_eq!(sizetree.insert(["b", "0", "x"], 3), Ok(()));
+    assert_eq!(sizetree.insert(["b", "0", "y"], 2), Ok(()));
+    assert_eq!(sizetree.insert(["a", "2", "x", "0"], 7), Ok(()));
+    assert_eq!(sizetree.insert(["b", "0", "z", "0"], 9), Ok(()));
+    assert_eq!(sizetree.insert(["a", "1", "x", "1"], 1), Ok(()));
+    sizetree
 }
 
 #[test]
-fn filetree_iter_empty() {
-    let mut filetree = FileTree::new();
-    assert_eq!(filetree.iter().next(), None);
+fn sizetree_iter_empty() {
+    let sizetree = SizeTree::new();
+    assert_eq!(sizetree.iter().next(), None);
 }
 
 #[test]
 fn insert_uniques_0() {
-    let mut entries = example_tree_0().iter().collect::<Vec<_>>();
-    sort_entries(&mut entries);
+    let tree = example_tree_0();
+    let entries = to_sorted_entries(&tree);
     assert_eq!(entries, vec![
-        Entry::Directory(Directory { path: "a".into(), size: 13 }),
-        Entry::Directory(Directory { path: "a/0".into(), size: 4 }),
-        Entry::File(File { path: "a/0/x".into(), size: 1 }),
-        Entry::File(File { path: "a/0/y".into(), size: 2 }),
-        Entry::Directory(Directory { path: "a/0/z".into(), size: 1 }),
-        Entry::File(File { path: "a/0/z/0".into(), size: 1 }),
-        Entry::Directory(Directory { path: "a/1".into(), size: 9 }),
-        Entry::Directory(Directory { path: "a/1/x".into(), size: 9 }),
-        Entry::File(File { path: "a/1/x/0".into(), size: 7 }),
-        Entry::File(File { path: "a/1/x/1".into(), size: 2 }),
+        (vec!["a"], 13, true),
+        (vec!["a", "0"], 4, true),
+        (vec!["a", "0", "x"], 1, false),
+        (vec!["a", "0", "y"], 2, false),
+        (vec!["a", "0", "z"], 1, true),
+        (vec!["a", "0", "z", "0"], 1, false),
+        (vec!["a", "1"], 9, true),
+        (vec!["a", "1", "x"], 9, true),
+        (vec!["a", "1", "x", "0"], 7, false),
+        (vec!["a", "1", "x", "1"], 2, false),
     ]);
 }
 
 #[test]
 fn insert_uniques_1() {
-    let mut entries = example_tree_1().iter().collect::<Vec<_>>();
-    sort_entries(&mut entries);
+    let tree = example_tree_1();
+    let entries = to_sorted_entries(&tree);
     assert_eq!(entries, vec![
-        Entry::Directory(Directory { path: "a".into(), size: 22 }),
-        Entry::Directory(Directory { path: "a/0".into(), size: 14 }),
-        Entry::File(File { path: "a/0/x".into(), size: 3 }),
-        Entry::File(File { path: "a/0/y".into(), size: 2 }),
-        Entry::Directory(Directory { path: "a/0/z".into(), size: 9 }),
-        Entry::File(File { path: "a/0/z/0".into(), size: 9 }),
-        Entry::Directory(Directory { path: "a/1".into(), size: 1 }),
-        Entry::Directory(Directory { path: "a/1/x".into(), size: 1 }),
-        Entry::File(File { path: "a/1/x/1".into(), size: 1 }),
-        Entry::Directory(Directory { path: "a/2".into(), size: 7 }),
-        Entry::Directory(Directory { path: "a/2/x".into(), size: 7 }),
-        Entry::File(File { path: "a/2/x/0".into(), size: 7 }),
+        (vec!["a"], 22, true),
+        (vec!["a", "0"], 14, true),
+        (vec!["a", "0", "x"], 3, false),
+        (vec!["a", "0", "y"], 2, false),
+        (vec!["a", "0", "z"], 9, true),
+        (vec!["a", "0", "z", "0"], 9, false),
+        (vec!["a", "1"], 1, true),
+        (vec!["a", "1", "x"], 1, true),
+        (vec!["a", "1", "x", "1"], 1, false),
+        (vec!["a", "2"], 7, true),
+        (vec!["a", "2", "x"], 7, true),
+        (vec!["a", "2", "x", "0"], 7, false),
+    ]);
+}
+
+#[test]
+fn insert_uniques_2() {
+    let tree = example_tree_2();
+    let entries = to_sorted_entries(&tree);
+    assert_eq!(entries, vec![
+        (vec!["a"], 8, true),
+        (vec!["a", "1"], 1, true),
+        (vec!["a", "1", "x"], 1, true),
+        (vec!["a", "1", "x", "1"], 1, false),
+        (vec!["a", "2"], 7, true),
+        (vec!["a", "2", "x"], 7, true),
+        (vec!["a", "2", "x", "0"], 7, false),
+        (vec!["b"], 14, true),
+        (vec!["b", "0"], 14, true),
+        (vec!["b", "0", "x"], 3, false),
+        (vec!["b", "0", "y"], 2, false),
+        (vec!["b", "0", "z"], 9, true),
+        (vec!["b", "0", "z", "0"], 9, false),
     ]);
 }
 
 #[test]
 fn insert_existing() {
-    let mut filetree = example_tree_0();
-    assert_eq!(filetree.insert("".into(), 1), Err(EntryExistsError));
-    assert_eq!(filetree.insert("a/0".into(), 1), Err(EntryExistsError));
-    assert_eq!(filetree.insert("a/0/z/0".into(), 1), Err(EntryExistsError));
+    let mut sizetree = example_tree_0();
+    assert_eq!(sizetree.insert(Vec::<&str>::new(), 1), Err(InsertError::EntryExists));
+    assert_eq!(sizetree.insert(["a", "0"], 1), Err(InsertError::EntryExists));
+    assert_eq!(sizetree.insert(["a", "0", "z", "0"], 1), Err(InsertError::EntryExists));
 }
 
 #[test]
 fn merge_test() {
-    let filetree = example_tree_0().merge(example_tree_1());
-    let mut entries = filetree.iter().collect::<Vec<_>>();
-    sort_entries(&mut entries);
+    let tree = example_tree_0().merge(example_tree_1());
+    let entries = to_sorted_entries(&tree);
     assert_eq!(entries, vec![
-        Entry::Directory(Directory { path: "a".into(), size: 22 }),
-        Entry::Directory(Directory { path: "a/0".into(), size: 14 }),
-        Entry::File(File { path: "a/0/x".into(), size: 3 }),
-        Entry::File(File { path: "a/0/y".into(), size: 2 }),
-        Entry::Directory(Directory { path: "a/0/z".into(), size: 9 }),
-        Entry::File(File { path: "a/0/z/0".into(), size: 9 }),
-        Entry::Directory(Directory { path: "a/1".into(), size: 9 }),
-        Entry::Directory(Directory { path: "a/1/x".into(), size: 9 }),
-        Entry::File(File { path: "a/1/x/0".into(), size: 7 }),
-        Entry::File(File { path: "a/1/x/1".into(), size: 2 }),
-        Entry::Directory(Directory { path: "a/2".into(), size: 7 }),
-        Entry::Directory(Directory { path: "a/2/x".into(), size: 7 }),
-        Entry::File(File { path: "a/2/x/0".into(), size: 7 }),
+        (vec!["a"], 22, true),
+        (vec!["a", "0"], 14, true),
+        (vec!["a", "0", "x"], 3, false),
+        (vec!["a", "0", "y"], 2, false),
+        (vec!["a", "0", "z"], 9, true),
+        (vec!["a", "0", "z", "0"], 9, false),
+        (vec!["a", "1"], 9, true),
+        (vec!["a", "1", "x"], 9, true),
+        (vec!["a", "1", "x", "0"], 7, false),
+        (vec!["a", "1", "x", "1"], 2, false),
+        (vec!["a", "2"], 7, true),
+        (vec!["a", "2", "x"], 7, true),
+        (vec!["a", "2", "x", "0"], 7, false),
     ]);
 }
 
@@ -214,45 +246,43 @@ fn cache_snapshots_entries() {
             assert_eq!(db_snapshots, hashes);
         }
 
-        fn test_max_file_sizes(
+        fn test_get_max_file_sizes<P: AsRef<Utf8Path>>(
             cache: &Cache,
-            filetree: FileTree,
-            path: Option<&str>,
+            tree: SizeTree,
+            path: P,
         ) {
-            let mut db_entries = cache.get_max_file_sizes(path).unwrap();
-            db_entries.sort_by_key(|e| e.path().to_string());
-            let mut entries = filetree
+            let mut db_entries = {
+                let path_id = if path.as_ref().as_str().is_empty() {
+                    None
+                } else {
+                    cache.get_path_id_by_path(path.as_ref()).unwrap()
+                };
+                if path_id.is_none() && !path.as_ref().as_str().is_empty() {
+                    // path was not found
+                    vec![]
+                } else {
+                    cache.get_max_file_sizes(path_id).unwrap()
+                        .into_iter()
+                        .map(|e| (e.component, e.size, e.is_dir))
+                        .collect::<Vec<_>>()
+                }
+            };
+            db_entries.sort_by_key(|(component, _, _)| component.clone());
+            let mut entries = to_sorted_entries(&tree)
                 .iter()
-                .filter(|e| {
-                    path_parent(e.path()) == path.map(|s| Utf8PathBuf::from(s))
-                })
-                .map(|e| {
-                    if let Some(parent) = path {
-                        match e {
-                            Entry::Directory(Directory { path, size }) =>
-                                Entry::Directory(Directory {
-                                    path: path
-                                        .strip_prefix(parent)
-                                        .unwrap()
-                                        .to_owned(),
-                                    size,
-                                }),
-                            Entry::File(File { path, size }) =>
-                                Entry::File(File {
-                                    path: path
-                                        .strip_prefix(parent)
-                                        .unwrap()
-                                        .to_owned(),
-                                    size,
-                                }),
-                        }
+                .filter_map(|(components, size, is_dir)| {
+                    // keep only the ones with parent == loc
+                    let (last, parent_cs) = components.split_last()?;
+                    let parent = parent_cs.iter().collect::<Utf8PathBuf>();
+                    if parent == path.as_ref() {
+                        Some((last.to_string(), *size, *is_dir))
                     } else {
-                        e
+                        None
                     }
                 })
-                .collect::<Vec<Entry>>();
-            entries.sort_by_key(|e| Reverse(e.size()));
-            entries.sort_by_key(|e| e.path().to_string());
+                .collect::<Vec<_>>();
+            entries.sort_by_key(|(_, size, _)| Reverse(*size));
+            entries.sort_by_key(|(component, _, _)| component.clone());
             assert_eq!(db_entries, entries);
         }
 
@@ -261,18 +291,18 @@ fn cache_snapshots_entries() {
         cache.save_snapshot("wat", example_tree_2()).unwrap();
 
         // Max sizes
-        fn test_entries(cache: &Cache, filetree: FileTree) {
-            test_max_file_sizes(cache, filetree.clone(), None);
-            test_max_file_sizes(cache, filetree.clone(), Some("a"));
-            test_max_file_sizes(cache, filetree.clone(), Some("b"));
-            test_max_file_sizes(cache, filetree.clone(), Some("a/0"));
-            test_max_file_sizes(cache, filetree.clone(), Some("a/1"));
-            test_max_file_sizes(cache, filetree.clone(), Some("a/2"));
-            test_max_file_sizes(cache, filetree.clone(), Some("b/0"));
-            test_max_file_sizes(cache, filetree.clone(), Some("b/1"));
-            test_max_file_sizes(cache, filetree.clone(), Some("b/2"));
-            test_max_file_sizes(cache, filetree.clone(), Some("something"));
-            test_max_file_sizes(cache, filetree.clone(), Some("a/something"));
+        fn test_entries(cache: &Cache, sizetree: SizeTree) {
+            test_get_max_file_sizes(cache, sizetree.clone(), "");
+            test_get_max_file_sizes(cache, sizetree.clone(), "a");
+            test_get_max_file_sizes(cache, sizetree.clone(), "b");
+            test_get_max_file_sizes(cache, sizetree.clone(), "a/0");
+            test_get_max_file_sizes(cache, sizetree.clone(), "a/1");
+            test_get_max_file_sizes(cache, sizetree.clone(), "a/2");
+            test_get_max_file_sizes(cache, sizetree.clone(), "b/0");
+            test_get_max_file_sizes(cache, sizetree.clone(), "b/1");
+            test_get_max_file_sizes(cache, sizetree.clone(), "b/2");
+            test_get_max_file_sizes(cache, sizetree.clone(), "something");
+            test_get_max_file_sizes(cache, sizetree.clone(), "a/something");
         }
 
         test_snapshots(&cache, vec!["foo", "bar", "wat"]);

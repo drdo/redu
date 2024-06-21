@@ -1,6 +1,5 @@
 #![feature(panic_update_hook)]
 
-use std::borrow::Cow;
 use std::io::stderr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
@@ -10,7 +9,7 @@ use std::time::{Duration, Instant};
 use std::{fs, panic, thread};
 
 use anyhow::Context;
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
 use clap::{command, Parser};
 use crossterm::event::{KeyCode, KeyModifiers};
 use crossterm::terminal::{
@@ -27,7 +26,7 @@ use ratatui::layout::Size;
 use ratatui::style::Stylize;
 use ratatui::widgets::WidgetRef;
 use ratatui::{CompletedFrame, Terminal};
-use redu::cache::filetree::FileTree;
+use redu::cache::filetree::SizeTree;
 use redu::cache::Cache;
 use redu::restic::Restic;
 use redu::{cache, restic};
@@ -79,7 +78,7 @@ struct Cli {
         default_value_t = 4,
         long_help = "
             How many restic subprocesses to spawn concurrently.
-            
+
             If you get ssh-related errors or too much memory use
             try lowering this."
     )]
@@ -139,10 +138,11 @@ fn main() -> anyhow::Result<()> {
             path
         };
 
-        fs::create_dir_all(dirs.cache_dir()).expect(&format!(
+        let err_msg = format!(
             "unable to create cache directory at {}",
-            dirs.cache_dir().to_string_lossy()
-        ));
+            dirs.cache_dir().to_string_lossy(),
+        );
+        fs::create_dir_all(dirs.cache_dir()).expect(&err_msg);
 
         eprintln!("Using cache file {cache_file:#?}");
         let migrator = match Cache::open(&cache_file) {
@@ -159,11 +159,13 @@ fn main() -> anyhow::Result<()> {
 
         if migrator.need_to_migrate() {
             let pb = new_pb(" {spinner} Upgrading cache version");
-            let cache = migrator.migrate()?;
+            let cache = migrator.migrate()
+                .context("cache migration failed")?;
             pb.finish();
             cache
         } else {
-            migrator.migrate()?
+            migrator.migrate()
+                .context("there is a problem with the cache")?
         }
     };
 
@@ -187,8 +189,9 @@ fn main() -> anyhow::Result<()> {
         let rect = terminal.size()?;
         App::new(
             rect.as_size(),
-            None::<Cow<Utf8Path>>,
-            cache.get_max_file_sizes(None::<&str>)?,
+            None,
+            Utf8PathBuf::new(),
+            cache.get_max_file_sizes(None)?,
             cache.get_marks().unwrap(),
             vec![
                 "m".bold(),
@@ -222,16 +225,22 @@ fn main() -> anyhow::Result<()> {
                     output_lines = lines;
                     break 'outer;
                 }
-                Action::GetEntries(path) => {
-                    let children = cache.get_max_file_sizes(path.as_deref())?;
-                    Some(Event::Entries { parent: path, children })
+                Action::GetParentEntries(path_id) => {
+                    let parent_id = cache.get_parent_id(path_id)?
+                        .expect("The UI requested a GetParentEntries with a path_id that does not exist");
+                    let entries = cache.get_max_file_sizes(parent_id)?;
+                    Some(Event::Entries { path_id: parent_id, entries })
+                }
+                Action::GetEntries(path_id) => {
+                    let entries = cache.get_max_file_sizes(path_id)?;
+                    Some(Event::Entries { path_id, entries })
                 }
                 Action::UpsertMark(path) => {
                     cache.upsert_mark(&path)?;
                     Some(Event::Marks(cache.get_marks()?))
                 }
-                Action::DeleteMark(path) => {
-                    cache.delete_mark(&path).unwrap();
+                Action::DeleteMark(loc) => {
+                    cache.delete_mark(&loc).unwrap();
                     Some(Event::Marks(cache.get_marks()?))
                 }
                 Action::DeleteAllMarks => {
@@ -271,9 +280,9 @@ fn sync_snapshots(
         let snapshots_to_delete = cache
             .get_snapshots()?
             .into_iter()
-            .filter(|snapshot| !repo_snapshots.contains(&snapshot))
+            .filter(|snapshot| !repo_snapshots.contains(snapshot))
             .collect::<Vec<Box<str>>>();
-        if snapshots_to_delete.len() > 0 {
+        if !snapshots_to_delete.is_empty() {
             eprintln!(
                 "Need to delete {} snapshot(s)",
                 snapshots_to_delete.len()
@@ -329,7 +338,7 @@ fn sync_snapshots(
 
         // Channel to funnel snapshots from the fetching threads to the db thread
         let (snapshot_sender, snapshot_receiver) =
-            mpsc::sync_channel::<(Box<str>, FileTree)>(2);
+            mpsc::sync_channel::<(Box<str>, SizeTree)>(2);
 
         // Start fetching threads
         for i in 0..fetching_thread_count {
@@ -380,16 +389,16 @@ fn sync_snapshots(
 #[derive(Debug, Error)]
 #[error("error in fetching thread")]
 enum FetchingThreadError {
-    ResticLaunchError(#[from] restic::LaunchError),
-    ResticError(#[from] restic::Error),
-    CacheError(#[from] rusqlite::Error),
+    ResticLaunch(#[from] restic::LaunchError),
+    Restic(#[from] restic::Error),
+    Cache(#[from] rusqlite::Error),
 }
 
 fn fetching_thread_body(
     restic: &Restic,
     missing_queue: Queue<Box<str>>,
     mpb: MultiProgress,
-    snapshot_sender: mpsc::SyncSender<(Box<str>, FileTree)>,
+    snapshot_sender: mpsc::SyncSender<(Box<str>, SizeTree)>,
     should_quit: Arc<AtomicBool>,
 ) -> Result<(), FetchingThreadError> {
     defer! { trace!("terminated") }
@@ -399,7 +408,7 @@ fn fetching_thread_body(
         let pb =
             mpb_insert_end(&mpb, "   {spinner} fetching {prefix}: starting up")
                 .with_prefix(short_id.clone());
-        let mut filetree = FileTree::new();
+        let mut sizetree = SizeTree::new();
         let files = restic.ls(&snapshot)?;
         trace!("started fetching snapshot ({short_id})");
         let start = Instant::now();
@@ -408,8 +417,8 @@ fn fetching_thread_body(
                 return Ok(());
             }
             let (file, _bytes_read) = r?;
-            filetree
-                .insert(&file.path, file.size)
+            sizetree
+                .insert(file.path.components(), file.size)
                 .expect("repeated entry in restic snapshot ls");
             if pb.position() == 0 {
                 pb.set_style(new_style(
@@ -429,7 +438,7 @@ fn fetching_thread_body(
             return Ok(());
         }
         let start = Instant::now();
-        snapshot_sender.send((snapshot.clone(), filetree)).unwrap();
+        snapshot_sender.send((snapshot.clone(), sizetree)).unwrap();
         info!(
             "waited {}s to send snapshot ({short_id})",
             start.elapsed().as_secs_f64()
@@ -449,7 +458,7 @@ fn db_thread_body(
     cache: &mut Cache,
     mpb: MultiProgress,
     main_pb: ProgressBar,
-    snapshot_receiver: mpsc::Receiver<(Box<str>, FileTree)>,
+    snapshot_receiver: mpsc::Receiver<(Box<str>, SizeTree)>,
     should_quit: Arc<AtomicBool>,
     should_quit_poll_period: Duration,
 ) -> Result<(), DBThreadError> {
@@ -463,7 +472,7 @@ fn db_thread_body(
         let start = Instant::now();
         // We wait with timeout to poll the should_quit periodically
         match snapshot_receiver.recv_timeout(should_quit_poll_period) {
-            Ok((id, filetree)) => {
+            Ok((id, sizetree)) => {
                 info!(
                     "waited {}s to get snapshot",
                     start.elapsed().as_secs_f64()
@@ -480,7 +489,7 @@ fn db_thread_body(
                 )
                 .with_prefix(short_id.clone());
                 let start = Instant::now();
-                cache.save_snapshot(id, filetree)?;
+                cache.save_snapshot(id, sizetree)?;
                 pb.finish_and_clear();
                 mpb.remove(&pb);
                 main_pb.inc(1);

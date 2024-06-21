@@ -7,8 +7,7 @@ use rusqlite::functions::FunctionFlags;
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use thiserror::Error;
 
-use crate::cache::filetree::FileTree;
-use crate::types::{Directory, Entry, File};
+use crate::cache::filetree::SizeTree;
 
 pub mod filetree;
 #[cfg(any(test, feature = "bench"))]
@@ -77,7 +76,7 @@ impl Cache {
         file: &Path,
         migration_target: Target,
     ) -> Result<Migrator, OpenError> {
-        let mut conn = Connection::open(&file)?;
+        let mut conn = Connection::open(file)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
 
@@ -127,10 +126,7 @@ impl Cache {
             };
             target_version
                 .map(|t| {
-                    applied_migrations
-                        .iter()
-                        .find(|m| t == m.version())
-                        .is_none()
+                    !applied_migrations.iter().any(|m| t == m.version())
                 })
                 .unwrap_or(false)
         };
@@ -144,63 +140,78 @@ impl Cache {
             .collect()
     }
 
+    pub fn get_parent_id(
+        &self,
+        path_id: PathId,
+    ) -> Result<Option<Option<PathId>>, rusqlite::Error> {
+        self.conn
+            .query_row(
+                "SELECT parent_id FROM paths WHERE id = ?",
+                [path_id.0],
+                |row| row.get("parent_id").map(raw_u64_to_o_path_id),
+            )
+            .optional()
+    }
+
+    /// This is not very efficient, it does one query per path component.
+    /// Mainly used for testing convenience.
+    pub fn get_path_id_by_path(
+        &self,
+        path: &Utf8Path,
+    ) -> Result<Option<PathId>, rusqlite::Error> {
+        let mut path_id = None;
+        for component in path {
+            path_id = self.conn
+                .query_row(
+                    "SELECT id FROM paths
+                     WHERE parent_id = ? AND component = ?",
+                    params![o_path_id_to_raw_u64(path_id), component],
+                    |row| row.get(0).map(PathId),
+                )
+                .optional()?;
+            if path_id.is_none() {
+                return Ok(None)
+            }
+        }
+        Ok(path_id)
+    }
+
     /// This returns the children files/directories of the given path.
     /// Each entry's size is the largest size of that file/directory across
     /// all snapshots.
     pub fn get_max_file_sizes(
         &self,
-        path: Option<impl AsRef<Utf8Path>>,
+        path_id: Option<PathId>,
     ) -> Result<Vec<Entry>, rusqlite::Error> {
         let aux = |row: &Row| {
-            let child_path = {
-                let child_path: Utf8PathBuf =
-                    row.get::<&str, String>("path")?.into();
-                path.as_ref()
-                    .map(AsRef::as_ref)
-                    .clone()
-                    .map(|p| {
-                        child_path.strip_prefix(p.as_std_path()).unwrap().into()
-                    })
-                    .unwrap_or(child_path)
-            };
-            let size = row.get("size")?;
-            Ok(if row.get("is_dir")? {
-                Entry::Directory(Directory { path: child_path, size })
-            } else {
-                Entry::File(File { path: child_path, size })
+            Ok(Entry {
+                path_id: PathId(row.get("path_id")?),
+                parent_id: raw_u64_to_o_path_id(row.get("parent_id")?),
+                component: row.get("component")?,
+                size: row.get("size")?,
+                is_dir: row.get("is_dir")?,
             })
         };
-
-        match path {
-            None => {
-                let mut stmt = self.conn.prepare(
-                    "SELECT path, max(size) as size, max(is_dir) as is_dir
-                     FROM entries JOIN paths ON path_id = paths.id
-                     WHERE parent IS NULL
-                     GROUP BY path
-                     ORDER BY size DESC",
-                )?;
-                let rows = stmt.query_map([], aux)?;
-                rows.collect()
-            }
-            Some(ref path) => {
-                let mut stmt = self.conn.prepare(
-                    "SELECT path, max(size) as size, max(is_dir) as is_dir
-                     FROM entries JOIN paths ON path_id = paths.id
-                     WHERE parent = ?
-                     GROUP BY path
-                     ORDER BY size DESC",
-                )?;
-                let rows = stmt.query_map([path.as_ref().as_str()], aux)?;
-                rows.collect()
-            }
-        }
+        let mut stmt = self.conn.prepare(
+            "SELECT
+                 path_id,
+                 parent_id,
+                 component,
+                 max(size) as size,
+                 max(is_dir) as is_dir
+             FROM entries JOIN paths ON path_id = paths.id
+             WHERE parent_id = ?
+             GROUP BY path_id
+             ORDER BY size DESC",
+        )?;
+        let rows = stmt.query_map([o_path_id_to_raw_u64(path_id)], aux)?;
+        rows.collect()
     }
 
     pub fn save_snapshot(
         &mut self,
         hash: impl AsRef<str>,
-        filetree: FileTree,
+        tree: SizeTree,
     ) -> Result<(), rusqlite::Error> {
         let tx = self.conn.transaction()?;
         {
@@ -210,28 +221,36 @@ impl Cache {
                 |row| row.get::<usize, u64>(0),
             )?;
             let mut paths_stmt = tx.prepare(
-                "INSERT INTO paths (path)
-                 VALUES (?)
-                 ON CONFLICT (path) DO NOTHING",
+                "INSERT INTO paths (parent_id, component)
+                 VALUES (?, ?)
+                 ON CONFLICT (parent_id, component) DO NOTHING",
+            )?;
+            let mut paths_query = tx.prepare(
+                "SELECT id FROM paths WHERE parent_id = ? AND component = ?"
             )?;
             let mut entries_stmt = tx.prepare(
                 "INSERT INTO entries (snapshot_id, path_id, size, is_dir)
-                 VALUES (?, (SELECT id FROM paths WHERE path = ?), ?, ?)",
+                 VALUES (?, ?, ?, ?)",
             )?;
-            for entry in filetree.iter() {
-                let (path, size, is_dir) = match entry {
-                    Entry::File(File { path, size }) => (path, size, false),
-                    Entry::Directory(Directory { path, size }) =>
-                        (path, size, true),
-                };
-                paths_stmt.execute([path.as_str()])?;
-                entries_stmt.execute(params![
-                    snapshot_id,
-                    path.as_str(),
-                    size,
-                    is_dir
+
+            tree.0.traverse_with_context(|id_stack, component, size, is_dir| {
+                let parent_id = id_stack.last().copied();
+                paths_stmt.execute(params![
+                    o_path_id_to_raw_u64(parent_id),
+                    component,
                 ])?;
-            }
+                let path_id = paths_query.query_row(
+                    params![o_path_id_to_raw_u64(parent_id), component],
+                    |row| row.get(0).map(PathId),
+                )?;
+                entries_stmt.execute(params![
+                            snapshot_id,
+                            path_id.0,
+                            size,
+                            is_dir
+                        ])?;
+                Ok::<PathId, rusqlite::Error>(path_id)
+            })?;
         }
         tx.commit()
     }
@@ -281,10 +300,40 @@ impl Cache {
         &mut self,
         path: &Utf8Path,
     ) -> Result<usize, rusqlite::Error> {
-        self.conn.execute("DELETE FROM marks WHERE path = ?", [path.as_str()])
+        self.conn.execute(
+            "DELETE FROM marks WHERE path = ?",
+            [path.as_str()],
+        )
     }
 
     pub fn delete_all_marks(&mut self) -> Result<usize, rusqlite::Error> {
         self.conn.execute("DELETE FROM marks", [])
     }
+}
+
+// A PathId should never be 0.
+// This is reserved for the absolute root and should match None
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(transparent)]
+pub struct PathId(u64);
+
+fn raw_u64_to_o_path_id(id: u64) -> Option<PathId> {
+    if id == 0 {
+        None
+    } else {
+        Some(PathId(id))
+    }
+}
+
+fn o_path_id_to_raw_u64(path_id: Option<PathId>) -> u64 {
+    path_id.map(|path_id| path_id.0).unwrap_or(0)
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Entry {
+    pub path_id: PathId,
+    pub parent_id: Option<PathId>,
+    pub component: String,
+    pub size: usize,
+    pub is_dir: bool,
 }

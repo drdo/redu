@@ -5,8 +5,8 @@ use std::marker::PhantomData;
 use std::os::unix::process::CommandExt;
 use std::process::{Child, ChildStdout, Command, ExitStatusError, Stdio};
 use std::str::Utf8Error;
-
 use camino::Utf8PathBuf;
+
 use log::info;
 use scopeguard::defer;
 use serde::de::DeserializeOwned;
@@ -82,7 +82,7 @@ impl Display for Error {
 
 impl From<LaunchError> for Error {
     fn from(value: LaunchError) -> Self {
-        Error { kind: ErrorKind::Launch(value.into()), stderr: None }
+        Error { kind: ErrorKind::Launch(value), stderr: None }
     }
 }
 
@@ -224,7 +224,7 @@ impl<T> Iter<T> {
             child,
             lines: BufReader::new(stdout).lines(),
             finished: false,
-            _phantom_data: PhantomData::default(),
+            _phantom_data: PhantomData,
         }
     }
 
