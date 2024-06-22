@@ -338,7 +338,7 @@ fn sync_snapshots(
 
         // Channel to funnel snapshots from the fetching threads to the db thread
         let (snapshot_sender, snapshot_receiver) =
-            mpsc::sync_channel::<(Box<str>, SizeTree)>(2);
+            mpsc::sync_channel::<(Box<str>, SizeTree)>(fetching_thread_count);
 
         // Start fetching threads
         for i in 0..fetching_thread_count {
