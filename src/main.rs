@@ -21,6 +21,8 @@ use directories::ProjectDirs;
 use flexi_logger::{FileSpec, LogSpecification, Logger, WriteMode};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::{error, info, trace};
+use rand::seq::SliceRandom;
+use rand::thread_rng;
 use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::layout::Size;
 use ratatui::style::Stylize;
@@ -297,10 +299,12 @@ fn sync_snapshots(
         }
 
         let db_snapshots = cache.get_snapshots()?;
-        repo_snapshots
+        let mut missing_snapshots = repo_snapshots
             .into_iter()
             .filter(|s| !db_snapshots.contains(s))
-            .collect()
+            .collect::<Vec<_>>();
+        missing_snapshots.shuffle(&mut thread_rng());
+        missing_snapshots
     };
 
     let total_missing_snapshots = match missing_snapshots.len() {
