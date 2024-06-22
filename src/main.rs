@@ -416,7 +416,7 @@ fn fetching_thread_body(
             if should_quit.load(Ordering::SeqCst) {
                 return Ok(());
             }
-            let (file, _bytes_read) = r?;
+            let file = r?;
             sizetree
                 .insert(file.path.components(), file.size)
                 .expect("repeated entry in restic snapshot ls");

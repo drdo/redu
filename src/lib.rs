@@ -4,4 +4,3 @@
 
 pub mod cache;
 pub mod restic;
-pub mod types;

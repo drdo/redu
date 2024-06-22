@@ -14,8 +14,6 @@ use serde::Deserialize;
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::types::{File, Snapshot};
-
 #[derive(Debug, Error)]
 #[error("error launching restic process")]
 pub struct LaunchError(#[source] pub std::io::Error);
@@ -113,7 +111,7 @@ impl Restic {
         &self,
         snapshot: &str,
     ) -> Result<
-        impl Iterator<Item = Result<(File, usize), Error>> + 'static,
+        impl Iterator<Item = Result<File, Error>> + 'static,
         LaunchError,
     > {
         fn parse_file(mut v: Value) -> Option<File> {
@@ -124,12 +122,9 @@ impl Restic {
             })
         }
 
-        Ok(self.run_lazy_command(["ls", snapshot])?.filter_map(|r| {
-            r.map(|(value, bytes_read)| {
-                parse_file(value).map(|file| (file, bytes_read))
-            })
-            .transpose()
-        }))
+        Ok(self.run_lazy_command(["ls", snapshot])?.filter_map(|r|
+            r.map(parse_file).transpose()
+        ))
     }
 
     // This is a trait object because of
@@ -138,7 +133,7 @@ impl Restic {
         &self,
         args: impl IntoIterator<Item = A>,
     ) -> Result<
-        Box<dyn Iterator<Item = Result<(T, usize), Error>> + 'static>,
+        Box<dyn Iterator<Item = Result<T, Error>> + 'static>,
         LaunchError,
     >
     where
@@ -247,14 +242,13 @@ impl<T> Iter<T> {
 }
 
 impl<T: DeserializeOwned> Iterator for Iter<T> {
-    type Item = Result<(T, usize), Error>;
+    type Item = Result<T, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(line) = self.lines.next() {
             let r_value = try {
                 let line = line?;
-                let value = serde_json::from_str(&line)?;
-                (value, line.len())
+                serde_json::from_str(&line)?
             };
             Some(match r_value {
                 Err(kind) => {
@@ -275,4 +269,15 @@ impl<T: DeserializeOwned> Iterator for Iter<T> {
             }
         }
     }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct Snapshot {
+    pub id: Box<str>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct File {
+    pub path: Utf8PathBuf,
+    pub size: usize,
 }
