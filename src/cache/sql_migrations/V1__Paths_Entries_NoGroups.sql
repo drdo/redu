@@ -12,17 +12,16 @@ CREATE INDEX snapshots_hash ON snapshots (hash);
 
 CREATE TABLE paths (
     id INTEGER PRIMARY KEY,
-    path TEXT UNIQUE NOT NULL,
-    parent TEXT GENERATED ALWAYS AS (path_parent(path))
+    parent_id INTEGER NOT NULL,
+    component TEXT NOT NULL
 );
-CREATE INDEX paths_path on paths (path);
-CREATE INDEX paths_parent ON paths (parent);
+CREATE UNIQUE INDEX paths_parent_component ON paths (parent_id, component);
 
 CREATE TABLE entries (
-    snapshot_id INTEGER,
-    path_id INTEGER,
-    size INTEGER,
-    is_dir INTEGER,
+    snapshot_id INTEGER NOT NULL,
+    path_id INTEGER NOT NULL,
+    size INTEGER NOT NULL,
+    is_dir INTEGER NOT NULL,
     PRIMARY KEY (snapshot_id, path_id)
 );
 CREATE INDEX entries_path_id ON entries (path_id);

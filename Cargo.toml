@@ -21,6 +21,7 @@ humansize = "2"
 indicatif = "0.17"
 log = "0.4"
 nix = { version = "0.28", features = ["process"] }
+rand = "0.8"
 ratatui = { version = "0.26", features = ["unstable-rendered-line-info", "unstable-widget-ref"] }
 refinery = { version = "0.8", features = ["rusqlite-bundled"]  }
 rusqlite = { version = "0.31", features = ["bundled", "functions", "trace"] }

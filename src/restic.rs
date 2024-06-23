@@ -1,20 +1,19 @@
-use std::ffi::OsStr;
-use std::fmt::{Display, Formatter};
-use std::io::{BufRead, BufReader, Lines, Read};
-use std::marker::PhantomData;
-use std::os::unix::process::CommandExt;
-use std::process::{Child, ChildStdout, Command, ExitStatusError, Stdio};
-use std::str::Utf8Error;
+use std::{
+    ffi::OsStr,
+    fmt::{Display, Formatter},
+    io::{BufRead, BufReader, Lines, Read},
+    marker::PhantomData,
+    os::unix::process::CommandExt,
+    process::{Child, ChildStdout, Command, ExitStatusError, Stdio},
+    str::Utf8Error,
+};
 
 use camino::Utf8PathBuf;
 use log::info;
 use scopeguard::defer;
-use serde::de::DeserializeOwned;
-use serde::Deserialize;
+use serde::{de::DeserializeOwned, Deserialize};
 use serde_json::Value;
 use thiserror::Error;
-
-use crate::types::{File, Snapshot};
 
 #[derive(Debug, Error)]
 #[error("error launching restic process")]
@@ -82,7 +81,7 @@ impl Display for Error {
 
 impl From<LaunchError> for Error {
     fn from(value: LaunchError) -> Self {
-        Error { kind: ErrorKind::Launch(value.into()), stderr: None }
+        Error { kind: ErrorKind::Launch(value), stderr: None }
     }
 }
 
@@ -112,10 +111,8 @@ impl Restic {
     pub fn ls(
         &self,
         snapshot: &str,
-    ) -> Result<
-        impl Iterator<Item = Result<(File, usize), Error>> + 'static,
-        LaunchError,
-    > {
+    ) -> Result<impl Iterator<Item = Result<File, Error>> + 'static, LaunchError>
+    {
         fn parse_file(mut v: Value) -> Option<File> {
             let mut m = std::mem::take(v.as_object_mut()?);
             Some(File {
@@ -124,12 +121,9 @@ impl Restic {
             })
         }
 
-        Ok(self.run_lazy_command(["ls", snapshot])?.filter_map(|r| {
-            r.map(|(value, bytes_read)| {
-                parse_file(value).map(|file| (file, bytes_read))
-            })
-            .transpose()
-        }))
+        Ok(self
+            .run_lazy_command(["ls", snapshot])?
+            .filter_map(|r| r.map(parse_file).transpose()))
     }
 
     // This is a trait object because of
@@ -137,10 +131,7 @@ impl Restic {
     fn run_lazy_command<T, A>(
         &self,
         args: impl IntoIterator<Item = A>,
-    ) -> Result<
-        Box<dyn Iterator<Item = Result<(T, usize), Error>> + 'static>,
-        LaunchError,
-    >
+    ) -> Result<Box<dyn Iterator<Item = Result<T, Error>> + 'static>, LaunchError>
     where
         T: DeserializeOwned + 'static,
         A: AsRef<OsStr>,
@@ -224,7 +215,7 @@ impl<T> Iter<T> {
             child,
             lines: BufReader::new(stdout).lines(),
             finished: false,
-            _phantom_data: PhantomData::default(),
+            _phantom_data: PhantomData,
         }
     }
 
@@ -247,14 +238,13 @@ impl<T> Iter<T> {
 }
 
 impl<T: DeserializeOwned> Iterator for Iter<T> {
-    type Item = Result<(T, usize), Error>;
+    type Item = Result<T, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(line) = self.lines.next() {
             let r_value = try {
                 let line = line?;
-                let value = serde_json::from_str(&line)?;
-                (value, line.len())
+                serde_json::from_str(&line)?
             };
             Some(match r_value {
                 Err(kind) => {
@@ -275,4 +265,15 @@ impl<T: DeserializeOwned> Iterator for Iter<T> {
             }
         }
     }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct Snapshot {
+    pub id: Box<str>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct File {
+    pub path: Utf8PathBuf,
+    pub size: usize,
 }
