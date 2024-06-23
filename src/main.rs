@@ -1,37 +1,49 @@
 #![feature(panic_update_hook)]
 
-use std::io::stderr;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::RecvTimeoutError;
-use std::sync::{mpsc, Arc, Mutex};
-use std::thread::ScopedJoinHandle;
-use std::time::{Duration, Instant};
-use std::{fs, panic, thread};
+use std::{
+    fs,
+    io::stderr,
+    panic,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+        mpsc::RecvTimeoutError,
+        Arc, Mutex,
+    },
+    thread,
+    thread::ScopedJoinHandle,
+    time::{Duration, Instant},
+};
 
 use anyhow::Context;
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{command, Parser};
-use crossterm::event::{KeyCode, KeyModifiers};
-use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen,
-    LeaveAlternateScreen,
+use crossterm::{
+    event::{KeyCode, KeyModifiers},
+    terminal::{
+        disable_raw_mode, enable_raw_mode, EnterAlternateScreen,
+        LeaveAlternateScreen,
+    },
+    ExecutableCommand,
 };
-use crossterm::ExecutableCommand;
 use directories::ProjectDirs;
 use flexi_logger::{FileSpec, LogSpecification, Logger, WriteMode};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::{error, info, trace};
-use rand::seq::SliceRandom;
-use rand::thread_rng;
-use ratatui::backend::{Backend, CrosstermBackend};
-use ratatui::layout::Size;
-use ratatui::style::Stylize;
-use ratatui::widgets::WidgetRef;
-use ratatui::{CompletedFrame, Terminal};
-use redu::cache::filetree::SizeTree;
-use redu::cache::Cache;
-use redu::restic::Restic;
-use redu::{cache, restic};
+use rand::{seq::SliceRandom, thread_rng};
+use ratatui::{
+    backend::{Backend, CrosstermBackend},
+    layout::Size,
+    style::Stylize,
+    widgets::WidgetRef,
+    CompletedFrame, Terminal,
+};
+use redu::{
+    cache,
+    cache::{filetree::SizeTree, Cache},
+    restic,
+    restic::Restic,
+};
 use scopeguard::defer;
 use thiserror::Error;
 
@@ -161,13 +173,11 @@ fn main() -> anyhow::Result<()> {
 
         if migrator.need_to_migrate() {
             let pb = new_pb(" {spinner} Upgrading cache version");
-            let cache = migrator.migrate()
-                .context("cache migration failed")?;
+            let cache = migrator.migrate().context("cache migration failed")?;
             pb.finish();
             cache
         } else {
-            migrator.migrate()
-                .context("there is a problem with the cache")?
+            migrator.migrate().context("there is a problem with the cache")?
         }
     };
 
@@ -513,8 +523,10 @@ fn db_thread_body(
 }
 
 fn convert_event(event: crossterm::event::Event) -> Option<Event> {
-    use crossterm::event::Event as TermEvent;
-    use crossterm::event::KeyEventKind::{Press, Release};
+    use crossterm::event::{
+        Event as TermEvent,
+        KeyEventKind::{Press, Release},
+    };
     use ui::Event::*;
 
     const KEYBINDINGS: &[((KeyModifiers, KeyCode), Event)] = &[

@@ -1,21 +1,25 @@
-use std::borrow::Cow;
-use std::cmp::{max, min};
-use std::collections::HashSet;
-use std::iter;
+use std::{
+    borrow::Cow,
+    cmp::{max, min},
+    collections::HashSet,
+    iter,
+};
 
 use camino::Utf8PathBuf;
-use ratatui::buffer::Buffer;
-use ratatui::layout::{Constraint, Direction, Layout, Position, Rect, Size};
-use ratatui::prelude::Line;
-use ratatui::style::{Style, Stylize};
-use ratatui::text::Span;
-use ratatui::widgets::{
-    Block, BorderType, Clear, List, ListItem, Padding, Paragraph, Widget,
-    WidgetRef, Wrap,
+use ratatui::{
+    buffer::Buffer,
+    layout::{Constraint, Direction, Layout, Position, Rect, Size},
+    prelude::Line,
+    style::{Style, Stylize},
+    text::Span,
+    widgets::{
+        Block, BorderType, Clear, List, ListItem, Padding, Paragraph, Widget,
+        WidgetRef, Wrap,
+    },
 };
 use unicode_segmentation::UnicodeSegmentation;
 
-use redu::cache::{Entry, PathId};
+use crate::cache::{Entry, PathId};
 
 #[derive(Clone, Debug)]
 pub enum Event {
@@ -75,8 +79,7 @@ impl App {
         entries: Vec<Entry>,
         marks: Vec<Utf8PathBuf>,
         footer_extra: Vec<Span<'static>>,
-    ) -> Self
-    {
+    ) -> Self {
         let list_size = compute_list_size(screen);
         App {
             path_id,
@@ -204,11 +207,7 @@ impl App {
     }
 
     fn generate(&self) -> Action {
-        let mut lines = self
-            .marks
-            .iter()
-            .map(Clone::clone)
-            .collect::<Vec<_>>();
+        let mut lines = self.marks.iter().map(Clone::clone).collect::<Vec<_>>();
         lines.sort_unstable();
         Action::Generate(lines)
     }
@@ -231,9 +230,8 @@ impl App {
         {
             // Check if the new path_id matches any of the old entries.
             // If we find one this means that we are going down into that entry.
-            if let Some(e) = self.entries
-                .iter()
-                .find(|e| Some(e.path_id) == path_id)
+            if let Some(e) =
+                self.entries.iter().find(|e| Some(e.path_id) == path_id)
             {
                 self.path.push(&e.component);
             } else {
@@ -273,7 +271,6 @@ impl App {
         }
         Some(self.full_path(&self.entries[self.selected]))
     }
-
 
     fn full_path(&self, entry: &Entry) -> Utf8PathBuf {
         let mut full_loc = self.path.clone();
@@ -340,9 +337,8 @@ impl WidgetRef for ConfirmDialog {
             buf: &mut Buffer,
         ) {
             let mut block = Block::bordered().border_type(BorderType::Plain);
-            let mut button = Paragraph::new(label)
-                .centered()
-                .wrap(Wrap { trim: false });
+            let mut button =
+                Paragraph::new(label).centered().wrap(Wrap { trim: false });
             if selected {
                 block = block.border_type(BorderType::QuadrantInside);
                 button = button.black().on_white();
@@ -482,7 +478,7 @@ impl WidgetRef for App {
         {
             // List
             let list_entries = to_list_entries(
-                |e| { self.marks.contains(&self.full_path(e)) },
+                |e| self.marks.contains(&self.full_path(e)),
                 self.entries.iter(),
             );
             let items =
@@ -527,18 +523,15 @@ fn to_list_entries<'a>(
         let largest = first.size as f64;
         iter::once(first)
             .chain(entries)
-            .map(|e@Entry { component, size, is_dir, .. }| {
-                ListEntry {
-                    name: component,
-                    size: *size,
-                    relative_size: *size as f64 / largest,
-                    is_dir: *is_dir,
-                    is_marked: is_marked(e),
-                }
+            .map(|e @ Entry { component, size, is_dir, .. }| ListEntry {
+                name: component,
+                size: *size,
+                relative_size: *size as f64 / largest,
+                is_dir: *is_dir,
+                is_marked: is_marked(e),
             })
             .collect()
-    }
-    else  {
+    } else {
         Vec::new()
     }
 }
@@ -600,12 +593,12 @@ fn centered(max_width: u16, max_height: u16, area: Rect) -> Rect {
 mod tests {
     use std::borrow::Cow;
 
-    use super::{*, shorten_to};
+    use super::{shorten_to, *};
 
     #[test]
     fn list_entry_to_line_narrow_width() {
         let f = ListEntry {
-            name: "1234567890123456789012345678901234567890".into(),
+            name: "1234567890123456789012345678901234567890",
             size: 999 * 1024 + 1010,
             relative_size: 0.9,
             is_dir: false,
@@ -625,7 +618,7 @@ mod tests {
     #[test]
     fn list_entry_to_line_large_size_file() {
         let f = ListEntry {
-            name: "1234567890123456789012345678901234567890".into(),
+            name: "1234567890123456789012345678901234567890",
             size: 999 * 1024 + 1010,
             relative_size: 0.9,
             is_dir: false,
@@ -645,7 +638,7 @@ mod tests {
     #[test]
     fn list_entry_to_line_small_size_file() {
         let f = ListEntry {
-            name: "1234567890123456789012345678901234567890".into(),
+            name: "1234567890123456789012345678901234567890",
             size: 9 * 1024,
             relative_size: 0.9,
             is_dir: false,
@@ -665,7 +658,7 @@ mod tests {
     #[test]
     fn list_entry_to_line_directory() {
         let f = ListEntry {
-            name: "1234567890123456789012345678901234567890".into(),
+            name: "1234567890123456789012345678901234567890",
             size: 9 * 1024 + 1010,
             relative_size: 0.9,
             is_dir: true,
@@ -687,7 +680,7 @@ mod tests {
     #[test]
     fn list_entry_to_line_file_selected() {
         let f = ListEntry {
-            name: "1234567890123456789012345678901234567890".into(),
+            name: "1234567890123456789012345678901234567890",
             size: 999 * 1024 + 1010,
             relative_size: 0.9,
             is_dir: false,
@@ -709,7 +702,7 @@ mod tests {
     #[test]
     fn list_entry_to_line_directory_selected() {
         let f = ListEntry {
-            name: "1234567890123456789012345678901234567890".into(),
+            name: "1234567890123456789012345678901234567890",
             size: 9 * 1024 + 1010,
             relative_size: 0.9,
             is_dir: true,
@@ -733,7 +726,7 @@ mod tests {
     #[test]
     fn list_entry_to_line_file_marked() {
         let f = ListEntry {
-            name: "1234567890123456789012345678901234567890".into(),
+            name: "1234567890123456789012345678901234567890",
             size: 999 * 1024 + 1010,
             relative_size: 0.9,
             is_dir: false,
@@ -753,7 +746,7 @@ mod tests {
     #[test]
     fn list_entry_to_line_file_marked_selected() {
         let f = ListEntry {
-            name: "1234567890123456789012345678901234567890".into(),
+            name: "1234567890123456789012345678901234567890",
             size: 999 * 1024 + 1010,
             relative_size: 0.9,
             is_dir: false,

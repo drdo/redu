@@ -1,16 +1,17 @@
-use std::ffi::OsStr;
-use std::fmt::{Display, Formatter};
-use std::io::{BufRead, BufReader, Lines, Read};
-use std::marker::PhantomData;
-use std::os::unix::process::CommandExt;
-use std::process::{Child, ChildStdout, Command, ExitStatusError, Stdio};
-use std::str::Utf8Error;
-use camino::Utf8PathBuf;
+use std::{
+    ffi::OsStr,
+    fmt::{Display, Formatter},
+    io::{BufRead, BufReader, Lines, Read},
+    marker::PhantomData,
+    os::unix::process::CommandExt,
+    process::{Child, ChildStdout, Command, ExitStatusError, Stdio},
+    str::Utf8Error,
+};
 
+use camino::Utf8PathBuf;
 use log::info;
 use scopeguard::defer;
-use serde::de::DeserializeOwned;
-use serde::Deserialize;
+use serde::{de::DeserializeOwned, Deserialize};
 use serde_json::Value;
 use thiserror::Error;
 
@@ -110,10 +111,8 @@ impl Restic {
     pub fn ls(
         &self,
         snapshot: &str,
-    ) -> Result<
-        impl Iterator<Item = Result<File, Error>> + 'static,
-        LaunchError,
-    > {
+    ) -> Result<impl Iterator<Item = Result<File, Error>> + 'static, LaunchError>
+    {
         fn parse_file(mut v: Value) -> Option<File> {
             let mut m = std::mem::take(v.as_object_mut()?);
             Some(File {
@@ -122,9 +121,9 @@ impl Restic {
             })
         }
 
-        Ok(self.run_lazy_command(["ls", snapshot])?.filter_map(|r|
-            r.map(parse_file).transpose()
-        ))
+        Ok(self
+            .run_lazy_command(["ls", snapshot])?
+            .filter_map(|r| r.map(parse_file).transpose()))
     }
 
     // This is a trait object because of
@@ -132,10 +131,7 @@ impl Restic {
     fn run_lazy_command<T, A>(
         &self,
         args: impl IntoIterator<Item = A>,
-    ) -> Result<
-        Box<dyn Iterator<Item = Result<T, Error>> + 'static>,
-        LaunchError,
-    >
+    ) -> Result<Box<dyn Iterator<Item = Result<T, Error>> + 'static>, LaunchError>
     where
         T: DeserializeOwned + 'static,
         A: AsRef<OsStr>,

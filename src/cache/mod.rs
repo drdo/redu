@@ -3,8 +3,9 @@ use std::path::Path;
 use camino::{Utf8Path, Utf8PathBuf};
 use log::trace;
 use refinery::{embed_migrations, Migration, Runner, Target};
-use rusqlite::functions::FunctionFlags;
-use rusqlite::{params, Connection, OptionalExtension, Row};
+use rusqlite::{
+    functions::FunctionFlags, params, Connection, OptionalExtension, Row,
+};
 use thiserror::Error;
 
 use crate::cache::filetree::SizeTree;
@@ -125,9 +126,7 @@ impl Cache {
                 }
             };
             target_version
-                .map(|t| {
-                    !applied_migrations.iter().any(|m| t == m.version())
-                })
+                .map(|t| !applied_migrations.iter().any(|m| t == m.version()))
                 .unwrap_or(false)
         };
         Ok(Migrator { conn, runner, need_to_migrate })
@@ -161,7 +160,8 @@ impl Cache {
     ) -> Result<Option<PathId>, rusqlite::Error> {
         let mut path_id = None;
         for component in path {
-            path_id = self.conn
+            path_id = self
+                .conn
                 .query_row(
                     "SELECT id FROM paths
                      WHERE parent_id = ? AND component = ?",
@@ -170,7 +170,7 @@ impl Cache {
                 )
                 .optional()?;
             if path_id.is_none() {
-                return Ok(None)
+                return Ok(None);
             }
         }
         Ok(path_id)
@@ -226,31 +226,33 @@ impl Cache {
                  ON CONFLICT (parent_id, component) DO NOTHING",
             )?;
             let mut paths_query = tx.prepare(
-                "SELECT id FROM paths WHERE parent_id = ? AND component = ?"
+                "SELECT id FROM paths WHERE parent_id = ? AND component = ?",
             )?;
             let mut entries_stmt = tx.prepare(
                 "INSERT INTO entries (snapshot_id, path_id, size, is_dir)
                  VALUES (?, ?, ?, ?)",
             )?;
 
-            tree.0.traverse_with_context(|id_stack, component, size, is_dir| {
-                let parent_id = id_stack.last().copied();
-                paths_stmt.execute(params![
-                    o_path_id_to_raw_u64(parent_id),
-                    component,
-                ])?;
-                let path_id = paths_query.query_row(
-                    params![o_path_id_to_raw_u64(parent_id), component],
-                    |row| row.get(0).map(PathId),
-                )?;
-                entries_stmt.execute(params![
-                            snapshot_id,
-                            path_id.0,
-                            size,
-                            is_dir
-                        ])?;
-                Ok::<PathId, rusqlite::Error>(path_id)
-            })?;
+            tree.0.traverse_with_context(
+                |id_stack, component, size, is_dir| {
+                    let parent_id = id_stack.last().copied();
+                    paths_stmt.execute(params![
+                        o_path_id_to_raw_u64(parent_id),
+                        component,
+                    ])?;
+                    let path_id = paths_query.query_row(
+                        params![o_path_id_to_raw_u64(parent_id), component],
+                        |row| row.get(0).map(PathId),
+                    )?;
+                    entries_stmt.execute(params![
+                        snapshot_id,
+                        path_id.0,
+                        size,
+                        is_dir
+                    ])?;
+                    Ok::<PathId, rusqlite::Error>(path_id)
+                },
+            )?;
         }
         tx.commit()
     }
@@ -279,6 +281,7 @@ impl Cache {
     // Marks ////////////////////////////////////////////////
     pub fn get_marks(&self) -> Result<Vec<Utf8PathBuf>, rusqlite::Error> {
         let mut stmt = self.conn.prepare("SELECT path FROM marks")?;
+        #[allow(clippy::let_and_return)]
         let result = stmt
             .query_map([], |row| Ok(row.get::<&str, String>("path")?.into()))?
             .collect();
@@ -300,10 +303,7 @@ impl Cache {
         &mut self,
         path: &Utf8Path,
     ) -> Result<usize, rusqlite::Error> {
-        self.conn.execute(
-            "DELETE FROM marks WHERE path = ?",
-            [path.as_str()],
-        )
+        self.conn.execute("DELETE FROM marks WHERE path = ?", [path.as_str()])
     }
 
     pub fn delete_all_marks(&mut self) -> Result<usize, rusqlite::Error> {

@@ -1,7 +1,7 @@
 max_width = 80
 match_arm_blocks = false
-error_on_line_overflow = true
-imports_granularity = "Module"
+error_on_line_overflow = false
+imports_granularity = "Crate"
 overflow_delimited_expr = true
 group_imports = "StdExternalCrate"
 use_small_heuristics = "Max"

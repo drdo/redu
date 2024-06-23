@@ -1,6 +1,9 @@
-use std::cmp::max;
-use std::collections::{hash_map, HashMap};
-use std::iter::Peekable;
+use std::{
+    cmp::max,
+    collections::{hash_map, HashMap},
+    iter::Peekable,
+};
+
 use thiserror::Error;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -23,7 +26,9 @@ impl SizeTree {
         SizeTree(self.0.merge(other.0, max))
     }
 
-    pub fn iter(&self) -> impl Iterator<Item=(usize, &str, usize, bool)> + '_ {
+    pub fn iter(
+        &self,
+    ) -> impl Iterator<Item = (usize, &str, usize, bool)> + '_ {
         self.0
             .iter()
             .map(|(level, cs, size, is_dir)| (level, cs, *size, is_dir))
@@ -37,7 +42,7 @@ impl SizeTree {
     ) -> Result<(), InsertError>
     where
         C: AsRef<str>,
-        P: IntoIterator<Item=C>,
+        P: IntoIterator<Item = C>,
     {
         let (mut breadcrumbs, mut remaining) = {
             let (breadcrumbs, remaining) = self.0.find(path);
@@ -57,7 +62,8 @@ impl SizeTree {
             if let Some(last) = breadcrumbs.pop() {
                 unsafe { &mut *last }
             } else if let Some(component) = remaining.next() {
-                self.0.children
+                self.0
+                    .children
                     .entry(Box::from(component.as_ref()))
                     .or_insert(Node::new(size))
             } else {
@@ -65,7 +71,8 @@ impl SizeTree {
             }
         };
         for component in remaining {
-            current_node = current_node.children
+            current_node = current_node
+                .children
                 .entry(Box::from(component.as_ref()))
                 .or_insert(Node::new(0));
             current_node.data = size;
@@ -93,14 +100,13 @@ impl<T> FileTree<T> {
 
     pub fn merge<F>(self, other: Self, mut combine: F) -> Self
     where
-        F: FnMut(T, T) -> T
+        F: FnMut(T, T) -> T,
     {
         fn merge_children<T, F: FnMut(T, T) -> T>(
             a: HashMap<Box<str>, Node<T>>,
             b: HashMap<Box<str>, Node<T>>,
             f: &mut F,
-        ) -> HashMap<Box<str>, Node<T>>
-        {
+        ) -> HashMap<Box<str>, Node<T>> {
             let mut sorted_a = sorted_hashmap(a).into_iter();
             let mut sorted_b = sorted_hashmap(b).into_iter();
             let mut children = HashMap::new();
@@ -134,8 +140,7 @@ impl<T> FileTree<T> {
             a: Node<T>,
             b: Node<T>,
             f: &mut F,
-        ) -> Node<T>
-        {
+        ) -> Node<T> {
             Node {
                 data: f(a.data, b.data),
                 children: merge_children(a.children, b.children, f),
@@ -146,17 +151,15 @@ impl<T> FileTree<T> {
             children: merge_children(
                 self.children,
                 other.children,
-                &mut combine
+                &mut combine,
             ),
         }
     }
 
     /// Depth first, parent before children
     pub fn iter(&self) -> Iter<'_, T> {
-        let breadcrumb = Breadcrumb {
-            level: 1,
-            children: self.children.iter(),
-        };
+        let breadcrumb =
+            Breadcrumb { level: 1, children: self.children.iter() };
         Iter { stack: vec![breadcrumb] }
     }
 
@@ -165,9 +168,12 @@ impl<T> FileTree<T> {
     /// all ancestors nodes `node_i` of the visited node.
     ///
     /// Depth first, parent before children
-    pub fn traverse_with_context<'a, C, E, F>(&'a self, mut f: F) -> Result<(), E>
+    pub fn traverse_with_context<'a, C, E, F>(
+        &'a self,
+        mut f: F,
+    ) -> Result<(), E>
     where
-        F: for<'b> FnMut(&'b [C], &'a str, &'a T, bool) -> Result<C, E>
+        F: for<'b> FnMut(&'b [C], &'a str, &'a T, bool) -> Result<C, E>,
     {
         let mut iter = self.iter();
         // First iteration just to initialized id_stack and previous_level
@@ -176,13 +182,14 @@ impl<T> FileTree<T> {
                 let context_component = f(&[], component, data, is_dir)?;
                 (vec![context_component], level)
             } else {
-                return Ok(())
+                return Ok(());
             }
         };
 
         for (level, component, size, is_dir) in iter {
-            if level <= previous_level { // We went up the tree or moved to a sibling
-                for _ in 0 .. previous_level - level + 1 {
+            if level <= previous_level {
+                // We went up the tree or moved to a sibling
+                for _ in 0..previous_level - level + 1 {
                     context.pop();
                 }
             }
@@ -198,11 +205,11 @@ impl<T> FileTree<T> {
     /// The cdr is the remaining path that did not match, if any.
     fn find<C, P>(
         &mut self,
-        path: P
-    ) -> (Vec<*mut Node<T>>, impl Iterator<Item=C>)
+        path: P,
+    ) -> (Vec<*mut Node<T>>, impl Iterator<Item = C>)
     where
         C: AsRef<str>,
-        P: IntoIterator<Item=C>,
+        P: IntoIterator<Item = C>,
     {
         let mut iter = path.into_iter().peekable();
         if let Some(component) = iter.peek() {
@@ -227,7 +234,7 @@ impl<T> Node<T> {
     ) -> (Vec<*mut Node<T>>, Peekable<P>)
     where
         C: AsRef<str>,
-        P: Iterator<Item=C>,
+        P: Iterator<Item = C>,
     {
         let mut breadcrumbs: Vec<*mut Node<T>> = vec![self];
         while let Some(c) = path.peek() {
@@ -262,7 +269,7 @@ impl<'a, T> Iterator for Iter<'a, T> {
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             if let Some(mut breadcrumb) = self.stack.pop() {
-                if let Some ((component, child)) = breadcrumb.children.next() {
+                if let Some((component, child)) = breadcrumb.children.next() {
                     let level = breadcrumb.level + 1;
                     let item = (
                         level,
@@ -275,10 +282,10 @@ impl<'a, T> Iterator for Iter<'a, T> {
                         level,
                         children: child.children.iter(),
                     });
-                    break Some(item)
+                    break Some(item);
                 }
             } else {
-                break None
+                break None;
             }
         }
     }

@@ -1,14 +1,14 @@
-use std::cmp::Reverse;
-use std::convert::Infallible;
-use std::fs;
+use std::{cmp::Reverse, convert::Infallible, fs};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use refinery::Target;
 use scopeguard::defer;
 use uuid::Uuid;
 
-use crate::cache::Cache;
-use crate::cache::filetree::{InsertError, SizeTree};
+use crate::cache::{
+    filetree::{InsertError, SizeTree},
+    Cache,
+};
 
 pub fn with_cache_open_with_target(
     migration_target: Target,
@@ -72,18 +72,20 @@ pub fn generate_sizetree(depth: usize, branching_factor: usize) -> SizeTree {
     sizetree
 }
 
-fn sort_entries(entries: &mut Vec<(Vec<&str>, usize, bool)>) {
+fn sort_entries(entries: &mut [(Vec<&str>, usize, bool)]) {
     entries.sort_unstable_by(|e0, e1| e0.0.cmp(&e1.0));
 }
 
 fn to_sorted_entries(tree: &SizeTree) -> Vec<(Vec<&str>, usize, bool)> {
     let mut entries = Vec::new();
-    tree.0.traverse_with_context(|context, component, size, is_dir| {
-        let mut path = Vec::from(context);
-        path.push(component);
-        entries.push((path, *size, is_dir));
-        Ok::<&str, Infallible>(component)
-    }).unwrap();
+    tree.0
+        .traverse_with_context(|context, component, size, is_dir| {
+            let mut path = Vec::from(context);
+            path.push(component);
+            entries.push((path, *size, is_dir));
+            Ok::<&str, Infallible>(component)
+        })
+        .unwrap();
     sort_entries(&mut entries);
     entries
 }
@@ -186,9 +188,15 @@ fn insert_uniques_2() {
 #[test]
 fn insert_existing() {
     let mut sizetree = example_tree_0();
-    assert_eq!(sizetree.insert(Vec::<&str>::new(), 1), Err(InsertError::EntryExists));
+    assert_eq!(
+        sizetree.insert(Vec::<&str>::new(), 1),
+        Err(InsertError::EntryExists)
+    );
     assert_eq!(sizetree.insert(["a", "0"], 1), Err(InsertError::EntryExists));
-    assert_eq!(sizetree.insert(["a", "0", "z", "0"], 1), Err(InsertError::EntryExists));
+    assert_eq!(
+        sizetree.insert(["a", "0", "z", "0"], 1),
+        Err(InsertError::EntryExists)
+    );
 }
 
 #[test]
@@ -261,7 +269,9 @@ fn cache_snapshots_entries() {
                     // path was not found
                     vec![]
                 } else {
-                    cache.get_max_file_sizes(path_id).unwrap()
+                    cache
+                        .get_max_file_sizes(path_id)
+                        .unwrap()
                         .into_iter()
                         .map(|e| (e.component, e.size, e.is_dir))
                         .collect::<Vec<_>>()
