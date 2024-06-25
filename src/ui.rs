@@ -175,10 +175,11 @@ impl App {
     fn right(&mut self) -> Action {
         if !self.entries.is_empty() {
             let entry = &self.entries[self.selected];
-            Action::GetEntries(Some(entry.path_id))
-        } else {
-            Action::Nothing
+            if entry.is_dir {
+                return Action::GetEntries(Some(entry.path_id));
+            }
         }
+        Action::Nothing
     }
 
     fn move_selection(&mut self, delta: isize, wrap: bool) -> Action {
