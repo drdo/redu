@@ -1,22 +1,27 @@
-use std::{cmp::Reverse, convert::Infallible, fs};
+use std::{cmp::Reverse, convert::Infallible, fs, path::PathBuf};
 
 use camino::{Utf8Path, Utf8PathBuf};
+use rusqlite::Connection;
 use scopeguard::defer;
 use uuid::Uuid;
 
-use super::LATEST_VERSION;
+use super::{determine_version, get_tables, LATEST_VERSION, MIGRATIONS};
 use crate::cache::{
     filetree::{InsertError, SizeTree},
     Cache, Migrator, VersionId,
 };
 
+pub fn tempfile() -> PathBuf {
+    let mut file = std::env::temp_dir();
+    file.push(Uuid::new_v4().to_string());
+    file
+}
+
 pub fn with_cache_open_with_target(
     target: VersionId,
     body: impl FnOnce(Cache),
 ) {
-    let mut file = std::env::temp_dir();
-    file.push(Uuid::new_v4().to_string());
-
+    let file = tempfile();
     defer! { fs::remove_file(&file).unwrap(); }
     let migrator = Migrator::open_with_target(&file, target).unwrap();
     body(migrator.migrate().unwrap());
@@ -334,4 +339,62 @@ fn cache_snapshots_entries() {
         test_snapshots(&cache, vec!["foo", "wat"]);
         test_entries(&cache, example_tree_0().merge(example_tree_2()));
     });
+}
+
+////////// Migrations //////////////////////////////////////////////////////////
+fn assert_tables(conn: &Connection, tables: &[&str]) {
+    let mut actual_tables: Vec<String> =
+        get_tables(conn).unwrap().into_iter().collect();
+    actual_tables.sort();
+    let mut expected_tables: Vec<String> =
+        tables.iter().map(ToString::to_string).collect();
+    expected_tables.sort();
+    assert_eq!(actual_tables, expected_tables);
+}
+
+fn assert_marks(cache: &Cache, marks: &[&str]) {
+    let mut actual_marks = cache.get_marks().unwrap();
+    actual_marks.sort();
+    let mut expected_marks: Vec<Utf8PathBuf> =
+        marks.iter().map(Utf8PathBuf::from).collect();
+    expected_marks.sort();
+    assert_eq!(actual_marks, expected_marks);
+}
+
+fn populate_v0<'a>(
+    marks: impl IntoIterator<Item = &'a str>,
+) -> Result<PathBuf, anyhow::Error> {
+    let file = tempfile();
+    let mut cache = Migrator::open_with_target(&file, 0)?.migrate()?;
+    let tx = cache.conn.transaction()?;
+    {
+        let mut marks_stmt =
+            tx.prepare("INSERT INTO marks (path) VALUES (?)")?;
+        for mark in marks {
+            marks_stmt.execute([mark])?;
+        }
+    }
+    tx.commit()?;
+    Ok(file)
+}
+
+#[test]
+fn test_migrate_v0_to_v1() {
+    let marks = ["/foo", "/bar/wat", "foo/a/b/c", "something"];
+    let file = populate_v0(marks).unwrap();
+
+    let mut cache =
+        Migrator::open_with_target(&file, 1).unwrap().migrate().unwrap();
+
+    assert_tables(&cache.conn, &[
+        "metadata_integer",
+        "snapshots",
+        "paths",
+        "entries",
+        "marks",
+    ]);
+
+    assert_marks(&cache, &marks);
+
+    assert_eq!(determine_version(&cache.conn).unwrap(), Some(1));
 }
