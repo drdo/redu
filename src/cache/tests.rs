@@ -1,29 +1,29 @@
 use std::{cmp::Reverse, convert::Infallible, fs};
 
 use camino::{Utf8Path, Utf8PathBuf};
-use refinery::Target;
 use scopeguard::defer;
 use uuid::Uuid;
 
+use super::LATEST_VERSION;
 use crate::cache::{
     filetree::{InsertError, SizeTree},
-    Cache,
+    Cache, Migrator, VersionId,
 };
 
 pub fn with_cache_open_with_target(
-    migration_target: Target,
+    target: VersionId,
     body: impl FnOnce(Cache),
 ) {
     let mut file = std::env::temp_dir();
     file.push(Uuid::new_v4().to_string());
 
     defer! { fs::remove_file(&file).unwrap(); }
-    let migrator = Cache::open_with_target(&file, migration_target).unwrap();
+    let migrator = Migrator::open_with_target(&file, target).unwrap();
     body(migrator.migrate().unwrap());
 }
 
 pub fn with_cache_open(body: impl FnOnce(Cache)) {
-    with_cache_open_with_target(Target::Latest, body);
+    with_cache_open_with_target(LATEST_VERSION, body);
 }
 
 pub fn path_parent(path: &Utf8Path) -> Option<Utf8PathBuf> {

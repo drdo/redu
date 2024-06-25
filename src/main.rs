@@ -6,12 +6,10 @@ use std::{
     panic,
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc,
-        mpsc::RecvTimeoutError,
+        mpsc::{self, RecvTimeoutError},
         Arc, Mutex,
     },
-    thread,
-    thread::ScopedJoinHandle,
+    thread::{self, ScopedJoinHandle},
     time::{Duration, Instant},
 };
 
@@ -39,10 +37,8 @@ use ratatui::{
     CompletedFrame, Terminal,
 };
 use redu::{
-    cache,
-    cache::{filetree::SizeTree, Cache},
-    restic,
-    restic::Restic,
+    cache::{self, filetree::SizeTree, Cache, Migrator},
+    restic::{self, Restic},
 };
 use scopeguard::defer;
 use thiserror::Error;
@@ -159,20 +155,16 @@ fn main() -> anyhow::Result<()> {
         fs::create_dir_all(dirs.cache_dir()).expect(&err_msg);
 
         eprintln!("Using cache file {cache_file:#?}");
-        let migrator = match Cache::open(&cache_file) {
-            Err(e) if cache::is_corruption_error(&e) => {
-                eprintln!("### Cache file corruption detected! Deleting and recreating. ###");
-                // Try to delete and reopen
-                fs::remove_file(&cache_file)
-                    .context("unable to remove corrupted cache file")?;
-                eprintln!("Corrupted cache file deleted");
-                Cache::open(&cache_file)
+        let migrator =
+            Migrator::open(&cache_file).context("unable to open cache file")?;
+        if let Some((old, new)) = migrator.need_to_migrate() {
+            eprintln!("Need to upgrade cache version from {old:?} to {new:?}");
+            let mut template =
+                String::from(" {spinner} Upgrading cache version");
+            if migrator.resync_necessary() {
+                template.push_str(" (a resync will be necessary)");
             }
-            migrator => migrator,
-        }.context("unable to open cache file")?;
-
-        if migrator.need_to_migrate() {
-            let pb = new_pb(" {spinner} Upgrading cache version");
+            let pb = new_pb(&template);
             let cache = migrator.migrate().context("cache migration failed")?;
             pb.finish();
             cache

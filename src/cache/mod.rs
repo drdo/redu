@@ -1,8 +1,7 @@
-use std::path::Path;
+use std::{collections::HashSet, path::Path};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use log::trace;
-use refinery::{embed_migrations, Migration, Runner, Target};
 use rusqlite::{
     functions::FunctionFlags, params, Connection, OptionalExtension, Row,
 };
@@ -14,22 +13,6 @@ pub mod filetree;
 #[cfg(any(test, feature = "bench"))]
 pub mod tests;
 
-embed_migrations!("src/cache/sql_migrations");
-
-pub fn is_corruption_error(error: &OpenError) -> bool {
-    const CORRUPTION_CODES: [rusqlite::ErrorCode; 2] = [
-        rusqlite::ErrorCode::DatabaseCorrupt,
-        rusqlite::ErrorCode::NotADatabase,
-    ];
-    match error {
-        OpenError::Sqlite(rusqlite::Error::SqliteFailure(
-            rusqlite::ffi::Error { code, .. },
-            _,
-        )) => CORRUPTION_CODES.contains(code),
-        _ => false,
-    }
-}
-
 #[derive(Debug)]
 pub struct Cache {
     conn: Connection,
@@ -40,98 +23,10 @@ pub enum OpenError {
     #[error("Sqlite error")]
     Sqlite(#[from] rusqlite::Error),
     #[error("Error running migrations")]
-    Migration(#[from] refinery::Error),
-}
-
-pub struct Migrator {
-    conn: Connection,
-    runner: Runner,
-    need_to_migrate: bool,
-}
-
-impl Migrator {
-    pub fn migrate(mut self) -> Result<Cache, refinery::Error> {
-        self.runner.run(&mut self.conn)?;
-        Ok(Cache { conn: self.conn })
-    }
-
-    pub fn need_to_migrate(&self) -> bool {
-        self.need_to_migrate
-    }
+    Migration(#[from] MigrationError),
 }
 
 impl Cache {
-    pub fn open(file: &Path) -> Result<Migrator, OpenError> {
-        Self::open_(file, Target::Latest)
-    }
-
-    #[cfg(any(test, feature = "bench"))]
-    pub fn open_with_target(
-        file: &Path,
-        migration_target: Target,
-    ) -> Result<Migrator, OpenError> {
-        Self::open_(file, migration_target)
-    }
-
-    fn open_(
-        file: &Path,
-        migration_target: Target,
-    ) -> Result<Migrator, OpenError> {
-        let mut conn = Connection::open(file)?;
-        conn.pragma_update(None, "journal_mode", "WAL")?;
-        conn.pragma_update(None, "synchronous", "NORMAL")?;
-
-        conn.create_scalar_function(
-            "path_parent",
-            1,
-            FunctionFlags::SQLITE_UTF8
-                | FunctionFlags::SQLITE_DETERMINISTIC
-                | FunctionFlags::SQLITE_INNOCUOUS,
-            |ctx| {
-                let path = Utf8Path::new(ctx.get_raw(0).as_str()?);
-                let parent = path.parent().map(ToOwned::to_owned);
-                Ok(parent.and_then(|p| {
-                    let s = p.to_string();
-                    if s.is_empty() {
-                        None
-                    } else {
-                        Some(s)
-                    }
-                }))
-            },
-        )?;
-        conn.profile(Some(|stmt, duration| {
-            trace!("SQL {stmt} (took {duration:#?})")
-        }));
-        let runner = migrations::runner().set_target(migration_target);
-        let need_to_migrate = {
-            let all_migrations =
-                runner.get_migrations().iter().map(Migration::version);
-            let target_version = match migration_target {
-                Target::Latest => all_migrations.max(),
-                Target::Fake => all_migrations.max(),
-                Target::Version(v) => Some(v),
-                Target::FakeVersion(v) => Some(v),
-            };
-            let applied_migrations = {
-                let stmt = "\
-                    SELECT name FROM sqlite_master
-                    WHERE type='table' AND name='refinery_schema_history'";
-                let refinery_schema_history_exists =
-                    conn.query_row(stmt, [], |_| Ok(())).optional()?.is_some();
-                if refinery_schema_history_exists {
-                    runner.get_applied_migrations(&mut conn)?
-                } else {
-                    vec![]
-                }
-            };
-            target_version
-                .map(|t| !applied_migrations.iter().any(|m| t == m.version()))
-                .unwrap_or(false)
-        };
-        Ok(Migrator { conn, runner, need_to_migrate })
-    }
-
     pub fn get_snapshots(&self) -> Result<Vec<Box<str>>, rusqlite::Error> {
         self.conn
             .prepare("SELECT hash FROM snapshots")?
@@ -336,4 +231,180 @@ pub struct Entry {
     pub component: String,
     pub size: usize,
     pub is_dir: bool,
+}
+
+////////// Migrations //////////////////////////////////////////////////////////
+type VersionId = u64;
+
+struct Migration {
+    old: Option<VersionId>,
+    new: VersionId,
+    resync_necessary: bool,
+    migration_fun: fn(&mut Connection) -> Result<(), rusqlite::Error>,
+}
+
+const INTEGER_METADATA_TABLE: &str = "metadata_integer";
+
+pub const LATEST_VERSION: VersionId = 1;
+
+const MIGRATIONS: [Migration; 3] = [
+    Migration {
+        old: None,
+        new: 0,
+        resync_necessary: false,
+        migration_fun: migrate_none_to_v0,
+    },
+    Migration {
+        old: None,
+        new: 1,
+        resync_necessary: false,
+        migration_fun: migrate_none_to_v1,
+    },
+    Migration {
+        old: Some(0),
+        new: 1,
+        resync_necessary: true,
+        migration_fun: migrate_v0_to_v1,
+    },
+];
+
+#[derive(Debug, Error)]
+pub enum MigrationError {
+    #[error("Invalid state, unable to determine version")]
+    UnableToDetermineVersion,
+    #[error("Do not know how to migrate from the current version")]
+    NoMigrationPath { old: Option<VersionId>, new: VersionId },
+    #[error("Sqlite error")]
+    Sql(#[from] rusqlite::Error),
+}
+
+pub struct Migrator<'a> {
+    conn: Connection,
+    migration: Option<&'a Migration>,
+}
+
+impl<'a> Migrator<'a> {
+    pub fn open<'b>(file: &'b Path) -> Result<Self, MigrationError> {
+        Self::open_(file, LATEST_VERSION)
+    }
+
+    #[cfg(any(test, feature = "bench"))]
+    pub fn open_with_target<'b>(
+        file: &'b Path,
+        target: VersionId,
+    ) -> Result<Self, MigrationError> {
+        Self::open_(file, target)
+    }
+
+    // We don't try to find multi step migrations.
+    fn open_<'b>(
+        file: &'b Path,
+        target: VersionId,
+    ) -> Result<Self, MigrationError> {
+        let mut conn = Connection::open(file)?;
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
+        // This is only used in V0
+        conn.create_scalar_function(
+            "path_parent",
+            1,
+            FunctionFlags::SQLITE_UTF8
+                | FunctionFlags::SQLITE_DETERMINISTIC
+                | FunctionFlags::SQLITE_INNOCUOUS,
+            |ctx| {
+                let path = Utf8Path::new(ctx.get_raw(0).as_str()?);
+                let parent = path.parent().map(ToOwned::to_owned);
+                Ok(parent.and_then(|p| {
+                    let s = p.to_string();
+                    if s.is_empty() {
+                        None
+                    } else {
+                        Some(s)
+                    }
+                }))
+            },
+        )?;
+        conn.profile(Some(|stmt, duration| {
+            trace!("SQL {stmt} (took {duration:#?})")
+        }));
+        let current = determine_version(&conn)?;
+        if current == Some(target) {
+            return Ok(Migrator { conn, migration: None });
+        }
+        if let Some(migration) =
+            MIGRATIONS.iter().find(|m| m.old == current && m.new == target)
+        {
+            Ok(Migrator { conn, migration: Some(migration) })
+        } else {
+            Err(MigrationError::NoMigrationPath { old: current, new: target })
+        }
+    }
+
+    pub fn migrate(mut self) -> Result<Cache, rusqlite::Error> {
+        if let Some(migration) = self.migration {
+            (migration.migration_fun)(&mut self.conn)?;
+        }
+        Ok(Cache { conn: self.conn })
+    }
+
+    pub fn need_to_migrate(&self) -> Option<(Option<VersionId>, VersionId)> {
+        self.migration.map(|m| (m.old, m.new))
+    }
+
+    pub fn resync_necessary(&self) -> bool {
+        self.migration.map(|m| m.resync_necessary).unwrap_or(false)
+    }
+}
+
+fn migrate_none_to_v0(conn: &mut Connection) -> Result<(), rusqlite::Error> {
+    let tx = conn.transaction()?;
+    tx.execute_batch(include_str!("sql/none_to_v0.sql"))?;
+    tx.commit()
+}
+
+fn migrate_none_to_v1(conn: &mut Connection) -> Result<(), rusqlite::Error> {
+    let tx = conn.transaction()?;
+    tx.execute_batch(include_str!("sql/none_to_v1.sql"))?;
+    tx.commit()
+}
+
+fn migrate_v0_to_v1(conn: &mut Connection) -> Result<(), rusqlite::Error> {
+    let tx = conn.transaction()?;
+    tx.execute_batch(include_str!("sql/v0_to_v1.sql"))?;
+    tx.commit()
+}
+
+fn determine_version(
+    conn: &Connection,
+) -> Result<Option<VersionId>, MigrationError> {
+    const V0_TABLES: [&str; 4] = ["snapshots", "files", "directories", "marks"];
+
+    let tables = get_tables(conn)?;
+    if tables.contains(INTEGER_METADATA_TABLE) {
+        conn.query_row(
+            &format!(
+                "SELECT value FROM {INTEGER_METADATA_TABLE}
+                 WHERE key = 'version'"
+            ),
+            [],
+            |row| row.get::<usize, VersionId>(0),
+        )
+        .optional()?
+        .map(|v| Ok(Some(v)))
+        .unwrap_or(Err(MigrationError::UnableToDetermineVersion))
+    } else if V0_TABLES.iter().all(|t| tables.contains(*t)) {
+        // The V0 tables are present but without a metadata table
+        // Assume V0 (pre-versioning schema).
+        Ok(Some(0))
+    } else {
+        // No metadata table and no V0 tables, assume a fresh db.
+        Ok(None)
+    }
+}
+
+fn get_tables(conn: &Connection) -> Result<HashSet<String>, rusqlite::Error> {
+    let mut stmt =
+        conn.prepare("SELECT name FROM sqlite_master WHERE type='table'")?;
+    let names = stmt.query_map([], |row| row.get(0))?;
+    names.collect()
 }
