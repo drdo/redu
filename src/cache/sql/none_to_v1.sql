@@ -1,8 +1,8 @@
-DROP INDEX files_path_parent;
-DROP INDEX directories_path_parent;
-DROP TABLE snapshots;
-DROP TABLE files;
-DROP TABLE directories;
+CREATE TABLE metadata_integer (
+    key TEXT PRIMARY KEY,
+    value INTEGER NOT NULL
+);
+INSERT INTO metadata_integer (key, value) VALUES ('version', 1);
 
 CREATE TABLE snapshots (
     id INTEGER PRIMARY KEY,
@@ -25,3 +25,7 @@ CREATE TABLE entries (
     PRIMARY KEY (snapshot_id, path_id)
 );
 CREATE INDEX entries_path_id ON entries (path_id);
+
+CREATE TABLE marks (
+    path TEXT PRIMARY KEY
+);
