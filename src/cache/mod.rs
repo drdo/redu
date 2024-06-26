@@ -49,6 +49,7 @@ impl Cache {
 
     /// This is not very efficient, it does one query per path component.
     /// Mainly used for testing convenience.
+    #[cfg(any(test, feature = "bench"))]
     pub fn get_path_id_by_path(
         &self,
         path: &Utf8Path,
@@ -115,6 +116,7 @@ impl Cache {
                 [hash.as_ref()],
                 |row| row.get::<usize, u64>(0),
             )?;
+
             let mut paths_stmt = tx.prepare(
                 "INSERT INTO paths (parent_id, component)
                  VALUES (?, ?)
@@ -123,6 +125,7 @@ impl Cache {
             let mut paths_query = tx.prepare(
                 "SELECT id FROM paths WHERE parent_id = ? AND component = ?",
             )?;
+
             let mut entries_stmt = tx.prepare(
                 "INSERT INTO entries (snapshot_id, path_id, size, is_dir)
                  VALUES (?, ?, ?, ?)",
