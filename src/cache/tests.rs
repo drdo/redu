@@ -5,7 +5,7 @@ use rusqlite::Connection;
 use scopeguard::defer;
 use uuid::Uuid;
 
-use super::{determine_version, get_tables, LATEST_VERSION, MIGRATIONS};
+use super::{determine_version, get_tables, LATEST_VERSION};
 use crate::cache::{
     filetree::{InsertError, SizeTree},
     Cache, Migrator, VersionId,
@@ -383,7 +383,7 @@ fn test_migrate_v0_to_v1() {
     let marks = ["/foo", "/bar/wat", "foo/a/b/c", "something"];
     let file = populate_v0(marks).unwrap();
 
-    let mut cache =
+    let cache =
         Migrator::open_with_target(&file, 1).unwrap().migrate().unwrap();
 
     assert_tables(&cache.conn, &[

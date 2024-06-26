@@ -284,23 +284,20 @@ pub struct Migrator<'a> {
 }
 
 impl<'a> Migrator<'a> {
-    pub fn open<'b>(file: &'b Path) -> Result<Self, MigrationError> {
+    pub fn open(file: &Path) -> Result<Self, MigrationError> {
         Self::open_(file, LATEST_VERSION)
     }
 
     #[cfg(any(test, feature = "bench"))]
-    pub fn open_with_target<'b>(
-        file: &'b Path,
+    pub fn open_with_target(
+        file: &Path,
         target: VersionId,
     ) -> Result<Self, MigrationError> {
         Self::open_(file, target)
     }
 
     // We don't try to find multi step migrations.
-    fn open_<'b>(
-        file: &'b Path,
-        target: VersionId,
-    ) -> Result<Self, MigrationError> {
+    fn open_(file: &Path, target: VersionId) -> Result<Self, MigrationError> {
         let mut conn = Connection::open(file)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
