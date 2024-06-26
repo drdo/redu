@@ -317,7 +317,7 @@ fn sync_snapshots(
         n => n,
     };
 
-    let missing_queue = Queue::new(missing_snapshots);
+    let missing_queue = FixedSizeQueue::new(missing_snapshots);
 
     // Create progress indicators
     let mpb = MultiProgress::new();
@@ -402,7 +402,7 @@ enum FetchingThreadError {
 
 fn fetching_thread_body(
     restic: &Restic,
-    missing_queue: Queue<Box<str>>,
+    missing_queue: FixedSizeQueue<Box<str>>,
     mpb: MultiProgress,
     snapshot_sender: mpsc::SyncSender<(Box<str>, SizeTree)>,
     should_quit: Arc<AtomicBool>,
@@ -616,11 +616,11 @@ fn snapshot_short_id(id: &str) -> String {
 }
 
 #[derive(Clone)]
-struct Queue<T>(Arc<Mutex<Vec<T>>>);
+struct FixedSizeQueue<T>(Arc<Mutex<Vec<T>>>);
 
-impl<T> Queue<T> {
+impl<T> FixedSizeQueue<T> {
     fn new(data: Vec<T>) -> Self {
-        Queue(Arc::new(Mutex::new(data)))
+        FixedSizeQueue(Arc::new(Mutex::new(data)))
     }
 
     fn pop(&self) -> Option<T> {
