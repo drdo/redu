@@ -61,7 +61,7 @@ impl Cache {
             path_id = self
                 .conn
                 .query_row(
-                    "SELECT id FROM paths
+                    "SELECT id FROM paths \
                      WHERE parent_id = ? AND component = ?",
                     params![o_path_id_to_raw_u64(path_id), component],
                     |row| row.get(0).map(PathId),
@@ -108,14 +108,14 @@ impl Cache {
                 .intersperse(String::from(" UNION ALL "))
                 .collect::<String>();
         let mut stmt = self.conn.prepare(&format!(
-            "WITH rich_entries AS ({cte_stmt_string})
-             SELECT
-                 path_id,
-                 component,
-                 max(size) as size,
-                 max(is_dir) as is_dir
-             FROM rich_entries
-             GROUP BY path_id
+            "WITH rich_entries AS ({cte_stmt_string}) \
+             SELECT \
+                 path_id, \
+                 component, \
+                 max(size) as size, \
+                 max(is_dir) as is_dir \
+             FROM rich_entries \
+             GROUP BY path_id \
              ORDER BY size DESC",
         ))?;
         let rows = stmt.query_map([], aux)?;
