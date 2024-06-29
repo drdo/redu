@@ -1,7 +1,7 @@
 CREATE TABLE metadata_integer (
     key TEXT PRIMARY KEY,
     value INTEGER NOT NULL
-);
+) WITHOUT ROWID;
 INSERT INTO metadata_integer (key, value) VALUES ('version', 1);
 
 CREATE TABLE snapshots (
@@ -22,10 +22,10 @@ CREATE TABLE entries (
     path_id INTEGER NOT NULL,
     size INTEGER NOT NULL,
     is_dir INTEGER NOT NULL,
-    PRIMARY KEY (snapshot_id, path_id)
-);
-CREATE INDEX entries_path_id ON entries (path_id);
+    PRIMARY KEY (path_id, snapshot_id)
+) WITHOUT ROWID;
+CREATE INDEX entries_snapshot_id ON entries (snapshot_id); -- for deletion
 
 CREATE TABLE marks (
     path TEXT PRIMARY KEY
-);
+) WITHOUT ROWID;
