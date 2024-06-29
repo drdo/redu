@@ -495,13 +495,14 @@ fn db_thread_body(
                 )
                 .with_prefix(short_id.clone());
                 let start = Instant::now();
-                cache.save_snapshot(id, sizetree)?;
+                let file_count = cache.save_snapshot(id, sizetree)?;
                 pb.finish_and_clear();
                 mpb.remove(&pb);
                 main_pb.inc(1);
                 info!(
-                    "waited {}s to save snapshot",
-                    start.elapsed().as_secs_f64()
+                    "waited {}s to save snapshot ({} files)",
+                    start.elapsed().as_secs_f64(),
+                    file_count
                 );
                 trace!("snapshot saved");
             }

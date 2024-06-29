@@ -108,7 +108,8 @@ impl Cache {
         &mut self,
         hash: impl AsRef<str>,
         tree: SizeTree,
-    ) -> Result<(), rusqlite::Error> {
+    ) -> Result<usize, rusqlite::Error> {
+        let mut file_count = 0;
         let tx = self.conn.transaction()?;
         {
             let snapshot_id = tx.query_row(
@@ -148,11 +149,13 @@ impl Cache {
                         size,
                         is_dir
                     ])?;
+                    file_count += 1;
                     Ok::<PathId, rusqlite::Error>(path_id)
                 },
             )?;
         }
-        tx.commit()
+        tx.commit()?;
+        Ok(file_count)
     }
 
     pub fn delete_snapshot(
