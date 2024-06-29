@@ -254,7 +254,7 @@ fn cache_snapshots_entries() {
             let mut db_snapshots = cache.get_snapshots().unwrap();
             db_snapshots.sort();
             let mut hashes =
-                hashes.into_iter().map(Box::from).collect::<Vec<Box<str>>>();
+                hashes.into_iter().map(String::from).collect::<Vec<String>>();
             hashes.sort();
             assert_eq!(db_snapshots, hashes);
         }
@@ -386,13 +386,7 @@ fn test_migrate_v0_to_v1() {
     let cache =
         Migrator::open_with_target(&file, 1).unwrap().migrate().unwrap();
 
-    assert_tables(&cache.conn, &[
-        "metadata_integer",
-        "snapshots",
-        "paths",
-        "entries",
-        "marks",
-    ]);
+    assert_tables(&cache.conn, &["metadata_integer", "paths", "marks"]);
 
     assert_marks(&cache, &marks);
 

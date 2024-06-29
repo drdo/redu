@@ -269,7 +269,7 @@ impl<T: DeserializeOwned> Iterator for Iter<T> {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Snapshot {
-    pub id: Box<str>,
+    pub id: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

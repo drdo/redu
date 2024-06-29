@@ -27,11 +27,13 @@ pub enum OpenError {
 }
 
 impl Cache {
-    pub fn get_snapshots(&self) -> Result<Vec<Box<str>>, rusqlite::Error> {
-        self.conn
-            .prepare("SELECT hash FROM snapshots")?
-            .query_map([], |row| row.get("hash"))?
-            .collect()
+    pub fn get_snapshots(&self) -> Result<Vec<String>, rusqlite::Error> {
+        Ok(get_tables(&self.conn)?
+            .iter()
+            .filter_map(|name| {
+                name.strip_prefix("entries_").map(ToOwned::to_owned)
+            })
+            .collect())
     }
 
     pub fn get_parent_id(
@@ -49,6 +51,7 @@ impl Cache {
 
     /// This is not very efficient, it does one query per path component.
     /// Mainly used for testing convenience.
+    #[cfg(any(test, feature = "bench"))]
     pub fn get_path_id_by_path(
         &self,
         path: &Utf8Path,
@@ -58,7 +61,7 @@ impl Cache {
             path_id = self
                 .conn
                 .query_row(
-                    "SELECT id FROM paths
+                    "SELECT id FROM paths \
                      WHERE parent_id = ? AND component = ?",
                     params![o_path_id_to_raw_u64(path_id), component],
                     |row| row.get(0).map(PathId),
@@ -81,25 +84,40 @@ impl Cache {
         let aux = |row: &Row| {
             Ok(Entry {
                 path_id: PathId(row.get("path_id")?),
-                parent_id: raw_u64_to_o_path_id(row.get("parent_id")?),
                 component: row.get("component")?,
                 size: row.get("size")?,
                 is_dir: row.get("is_dir")?,
             })
         };
-        let mut stmt = self.conn.prepare(
-            "SELECT
-                 path_id,
-                 parent_id,
-                 component,
-                 max(size) as size,
-                 max(is_dir) as is_dir
-             FROM entries JOIN paths ON path_id = paths.id
-             WHERE parent_id = ?
-             GROUP BY path_id
+        let raw_path_id = o_path_id_to_raw_u64(path_id);
+        let cte_stmt_string = get_tables(&self.conn)?
+            .into_iter()
+            .filter(|name| name.starts_with("entries_"))
+            .map(|table| {
+                format!(
+                    "SELECT \
+                         path_id, \
+                         component, \
+                         size, \
+                         is_dir \
+                     FROM \"{table}\" JOIN paths ON path_id = paths.id \
+                     WHERE parent_id = {raw_path_id}\n"
+                )
+            })
+            .intersperse(String::from(" UNION ALL "))
+            .collect::<String>();
+        let mut stmt = self.conn.prepare(&format!(
+            "WITH rich_entries AS ({cte_stmt_string}) \
+             SELECT \
+                 path_id, \
+                 component, \
+                 max(size) as size, \
+                 max(is_dir) as is_dir \
+             FROM rich_entries \
+             GROUP BY path_id \
              ORDER BY size DESC",
-        )?;
-        let rows = stmt.query_map([o_path_id_to_raw_u64(path_id)], aux)?;
+        ))?;
+        let rows = stmt.query_map([], aux)?;
         rows.collect()
     }
 
@@ -107,14 +125,24 @@ impl Cache {
         &mut self,
         hash: impl AsRef<str>,
         tree: SizeTree,
-    ) -> Result<(), rusqlite::Error> {
+    ) -> Result<usize, rusqlite::Error> {
+        let mut file_count = 0;
         let tx = self.conn.transaction()?;
         {
-            let snapshot_id = tx.query_row(
-                "INSERT INTO snapshots (hash) VALUES (?) RETURNING (id)",
-                [hash.as_ref()],
-                |row| row.get::<usize, u64>(0),
+            let entries_table = format!("entries_{}", hash.as_ref());
+
+            tx.execute(
+                &format!(
+                    "CREATE TABLE \"{entries_table}\" (
+                         path_id INTEGER PRIMARY KEY,
+                         size INTEGER NOT NULL,
+                         is_dir INTEGER NOT NULL,
+                         FOREIGN KEY (path_id) REFERENCES paths (id)
+                     )"
+                ),
+                [],
             )?;
+
             let mut paths_stmt = tx.prepare(
                 "INSERT INTO paths (parent_id, component)
                  VALUES (?, ?)
@@ -123,10 +151,11 @@ impl Cache {
             let mut paths_query = tx.prepare(
                 "SELECT id FROM paths WHERE parent_id = ? AND component = ?",
             )?;
-            let mut entries_stmt = tx.prepare(
-                "INSERT INTO entries (snapshot_id, path_id, size, is_dir)
-                 VALUES (?, ?, ?, ?)",
-            )?;
+
+            let mut entries_stmt = tx.prepare(&format!(
+                "INSERT INTO \"{entries_table}\" (path_id, size, is_dir) \
+                 VALUES (?, ?, ?)",
+            ))?;
 
             tree.0.traverse_with_context(
                 |id_stack, component, size, is_dir| {
@@ -139,38 +168,25 @@ impl Cache {
                         params![o_path_id_to_raw_u64(parent_id), component],
                         |row| row.get(0).map(PathId),
                     )?;
-                    entries_stmt.execute(params![
-                        snapshot_id,
-                        path_id.0,
-                        size,
-                        is_dir
-                    ])?;
+                    entries_stmt.execute(params![path_id.0, size, is_dir])?;
+                    file_count += 1;
                     Ok::<PathId, rusqlite::Error>(path_id)
                 },
             )?;
         }
-        tx.commit()
+        tx.commit()?;
+        Ok(file_count)
     }
 
     pub fn delete_snapshot(
         &mut self,
         hash: impl AsRef<str>,
     ) -> Result<(), rusqlite::Error> {
-        let hash = hash.as_ref();
-        let tx = self.conn.transaction()?;
-        if let Some(snapshot_id) = tx
-            .query_row(
-                "DELETE FROM snapshots WHERE hash = ? RETURNING (id)",
-                [hash],
-                |row| row.get::<usize, u64>(0),
-            )
-            .optional()?
-        {
-            tx.execute("DELETE FROM entries WHERE snapshot_id = ?", [
-                snapshot_id,
-            ])?;
-        }
-        tx.commit()
+        self.conn.execute(
+            &format!("DROP TABLE IF EXISTS \"entries_{}\"", hash.as_ref()),
+            [],
+        )?;
+        Ok(())
     }
 
     // Marks ////////////////////////////////////////////////
@@ -227,7 +243,6 @@ fn o_path_id_to_raw_u64(path_id: Option<PathId>) -> u64 {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Entry {
     pub path_id: PathId,
-    pub parent_id: Option<PathId>,
     pub component: String,
     pub size: usize,
     pub is_dir: bool,
