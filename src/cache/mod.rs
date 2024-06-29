@@ -90,23 +90,22 @@ impl Cache {
             })
         };
         let raw_path_id = o_path_id_to_raw_u64(path_id);
-        let cte_stmt_string =
-            get_tables(&self.conn)?
-                .into_iter()
-                .filter(|name| name.starts_with("entries_"))
-                .map(|table| {
-                    format!(
-                        "SELECT \
-                             path_id, \
-                             component, \
-                             size, \
-                             is_dir \
-                         FROM \"{table}\" JOIN paths ON path_id = paths.id \
-                         WHERE parent_id = {raw_path_id}\n"
-                    )
-                })
-                .intersperse(String::from(" UNION ALL "))
-                .collect::<String>();
+        let cte_stmt_string = get_tables(&self.conn)?
+            .into_iter()
+            .filter(|name| name.starts_with("entries_"))
+            .map(|table| {
+                format!(
+                    "SELECT \
+                         path_id, \
+                         component, \
+                         size, \
+                         is_dir \
+                     FROM \"{table}\" JOIN paths ON path_id = paths.id \
+                     WHERE parent_id = {raw_path_id}\n"
+                )
+            })
+            .intersperse(String::from(" UNION ALL "))
+            .collect::<String>();
         let mut stmt = self.conn.prepare(&format!(
             "WITH rich_entries AS ({cte_stmt_string}) \
              SELECT \

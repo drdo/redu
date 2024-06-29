@@ -386,11 +386,7 @@ fn test_migrate_v0_to_v1() {
     let cache =
         Migrator::open_with_target(&file, 1).unwrap().migrate().unwrap();
 
-    assert_tables(&cache.conn, &[
-        "metadata_integer",
-        "paths",
-        "marks",
-    ]);
+    assert_tables(&cache.conn, &["metadata_integer", "paths", "marks"]);
 
     assert_marks(&cache, &marks);
 
