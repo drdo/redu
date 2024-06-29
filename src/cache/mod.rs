@@ -137,7 +137,8 @@ impl Cache {
                     "CREATE TABLE \"{entries_table}\" (
                          path_id INTEGER PRIMARY KEY,
                          size INTEGER NOT NULL,
-                         is_dir INTEGER NOT NULL
+                         is_dir INTEGER NOT NULL,
+                         FOREIGN KEY (path_id) REFERENCES paths (id)
                      )"
                 ),
                 [],
