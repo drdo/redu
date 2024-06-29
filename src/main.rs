@@ -270,14 +270,14 @@ fn sync_snapshots(
     fetching_thread_count: usize,
 ) -> anyhow::Result<()> {
     // Figure out what snapshots we need to fetch
-    let missing_snapshots: Vec<Box<str>> = {
+    let missing_snapshots: Vec<String> = {
         // Fetch snapshot list
         let pb = new_pb(" {spinner} Fetching repository snapshot list");
         let repo_snapshots = restic
             .snapshots()?
             .into_iter()
             .map(|s| s.id)
-            .collect::<Vec<Box<str>>>();
+            .collect::<Vec<String>>();
         pb.finish();
 
         // Delete snapshots from the DB that were deleted on the repo
@@ -285,7 +285,7 @@ fn sync_snapshots(
             .get_snapshots()?
             .into_iter()
             .filter(|snapshot| !repo_snapshots.contains(snapshot))
-            .collect::<Vec<Box<str>>>();
+            .collect::<Vec<String>>();
         if !snapshots_to_delete.is_empty() {
             eprintln!(
                 "Need to delete {} snapshot(s)",
@@ -344,7 +344,7 @@ fn sync_snapshots(
 
         // Channel to funnel snapshots from the fetching threads to the db thread
         let (snapshot_sender, snapshot_receiver) =
-            mpsc::sync_channel::<(Box<str>, SizeTree)>(fetching_thread_count);
+            mpsc::sync_channel::<(String, SizeTree)>(fetching_thread_count);
 
         // Start fetching threads
         for i in 0..fetching_thread_count {
@@ -402,9 +402,9 @@ enum FetchingThreadError {
 
 fn fetching_thread_body(
     restic: &Restic,
-    missing_queue: FixedSizeQueue<Box<str>>,
+    missing_queue: FixedSizeQueue<String>,
     mpb: MultiProgress,
-    snapshot_sender: mpsc::SyncSender<(Box<str>, SizeTree)>,
+    snapshot_sender: mpsc::SyncSender<(String, SizeTree)>,
     should_quit: Arc<AtomicBool>,
 ) -> Result<(), FetchingThreadError> {
     defer! { trace!("terminated") }
@@ -464,7 +464,7 @@ fn db_thread_body(
     cache: &mut Cache,
     mpb: MultiProgress,
     main_pb: ProgressBar,
-    snapshot_receiver: mpsc::Receiver<(Box<str>, SizeTree)>,
+    snapshot_receiver: mpsc::Receiver<(String, SizeTree)>,
     should_quit: Arc<AtomicBool>,
     should_quit_poll_period: Duration,
 ) -> Result<(), DBThreadError> {
