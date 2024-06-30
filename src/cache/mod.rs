@@ -9,10 +9,7 @@ use rusqlite::{
 };
 use thiserror::Error;
 
-use crate::{
-    cache::filetree::SizeTree,
-    restic::Snapshot,
-};
+use crate::{cache::filetree::SizeTree, restic::Snapshot};
 
 pub mod filetree;
 #[cfg(any(test, feature = "bench"))]
