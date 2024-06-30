@@ -1,14 +1,33 @@
-use std::{cmp::Reverse, convert::Infallible, fs, path::PathBuf};
+use std::{cmp::Reverse, convert::Infallible, fs, iter, path::PathBuf};
 
 use camino::{Utf8Path, Utf8PathBuf};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use rusqlite::Connection;
 use scopeguard::defer;
 use uuid::Uuid;
 
+pub fn mk_datetime(
+    year: i32,
+    month: u32,
+    day: u32,
+    hour: u32,
+    minute: u32,
+    second: u32,
+) -> DateTime<Utc> {
+    NaiveDateTime::new(
+        NaiveDate::from_ymd_opt(year, month, day).unwrap(),
+        NaiveTime::from_hms_opt(hour, minute, second).unwrap(),
+    )
+    .and_utc()
+}
+
 use super::{determine_version, get_tables, LATEST_VERSION};
-use crate::cache::{
-    filetree::{InsertError, SizeTree},
-    Cache, Migrator, VersionId,
+use crate::{
+    cache::{
+        filetree::{InsertError, SizeTree},
+        Cache, Migrator, VersionId,
+    },
+    restic::Snapshot,
 };
 
 pub fn tempfile() -> PathBuf {
@@ -250,18 +269,45 @@ fn merge_commutativity() {
 #[test]
 fn cache_snapshots_entries() {
     with_cache_open(|mut cache| {
-        fn test_snapshots(cache: &Cache, hashes: Vec<&str>) {
+        fn test_snapshots(cache: &Cache, mut snapshots: Vec<&Snapshot>) {
             let mut db_snapshots = cache.get_snapshots().unwrap();
-            db_snapshots.sort();
-            let mut hashes =
-                hashes.into_iter().map(String::from).collect::<Vec<String>>();
-            hashes.sort();
-            assert_eq!(db_snapshots, hashes);
+            db_snapshots.sort_unstable_by(|s0, s1| s0.id.cmp(&s1.id));
+            snapshots.sort_unstable_by(|s0, s1| s0.id.cmp(&s1.id));
+            for (s0, s1) in iter::zip(db_snapshots.iter(), snapshots.iter()) {
+                assert_eq!(s0.id, s1.id);
+                assert_eq!(s0.time, s1.time);
+                assert_eq!(s0.parent, s1.parent);
+                assert_eq!(s0.tree, s1.tree);
+                assert_eq!(s0.hostname, s1.hostname);
+                assert_eq!(s0.username, s1.username);
+                assert_eq!(s0.uid, s1.uid);
+                assert_eq!(s0.gid, s1.gid);
+                assert_eq!(s0.original_id, s1.original_id);
+                assert_eq!(s0.program_version, s1.program_version);
+
+                let mut s0_paths: Vec<String> = s0.paths.to_vec();
+                s0_paths.sort();
+                let mut s1_paths: Vec<String> = s1.paths.to_vec();
+                s1_paths.sort();
+                assert_eq!(s0_paths, s1_paths);
+
+                let mut s0_excludes: Vec<String> = s0.excludes.to_vec();
+                s0_excludes.sort();
+                let mut s1_excludes: Vec<String> = s1.excludes.to_vec();
+                s1_excludes.sort();
+                assert_eq!(s0_excludes, s1_excludes);
+
+                let mut s0_tags: Vec<String> = s0.tags.to_vec();
+                s0_tags.sort();
+                let mut s1_tags: Vec<String> = s1.tags.to_vec();
+                s1_tags.sort();
+                assert_eq!(s0_tags, s1_tags);
+            }
         }
 
         fn test_get_max_file_sizes<P: AsRef<Utf8Path>>(
             cache: &Cache,
-            tree: SizeTree,
+            tree: &SizeTree,
             path: P,
         ) {
             let mut db_entries = {
@@ -301,26 +347,86 @@ fn cache_snapshots_entries() {
             assert_eq!(db_entries, entries);
         }
 
-        cache.save_snapshot("foo", example_tree_0()).unwrap();
-        cache.save_snapshot("bar", example_tree_1()).unwrap();
-        cache.save_snapshot("wat", example_tree_2()).unwrap();
+        let foo = Snapshot {
+            id: "foo".to_string(),
+            time: mk_datetime(2024, 4, 12, 12, 00, 00),
+            parent: Some("bar".to_string()),
+            tree: "sometree".to_string(),
+            paths: vec![
+                "/home/user".to_string(),
+                "/etc".to_string(),
+                "/var".to_string(),
+            ],
+            hostname: Some("foo.com".to_string()),
+            username: Some("user".to_string()),
+            uid: Some(123),
+            gid: Some(456),
+            excludes: vec![
+                ".cache".to_string(),
+                "Cache".to_string(),
+                "/home/user/Downloads".to_string(),
+            ],
+            tags: vec!["foo_machine".to_string(), "rewrite".to_string()],
+            original_id: Some("fefwfwew".to_string()),
+            program_version: Some("restic 0.16.0".to_string()),
+        };
 
-        // Max sizes
+        let bar = Snapshot {
+            id: "bar".to_string(),
+            time: mk_datetime(2025, 5, 12, 17, 00, 00),
+            parent: Some("wat".to_string()),
+            tree: "anothertree".to_string(),
+            paths: vec!["/home/user".to_string()],
+            hostname: Some("foo.com".to_string()),
+            username: Some("user".to_string()),
+            uid: Some(123),
+            gid: Some(456),
+            excludes: vec![
+                ".cache".to_string(),
+                "Cache".to_string(),
+                "/home/user/Downloads".to_string(),
+            ],
+            tags: vec!["foo_machine".to_string(), "rewrite".to_string()],
+            original_id: Some("fefwfwew".to_string()),
+            program_version: Some("restic 0.16.0".to_string()),
+        };
+
+        let wat = Snapshot {
+            id: "wat".to_string(),
+            time: mk_datetime(2023, 5, 12, 17, 00, 00),
+            parent: None,
+            tree: "fwefwfwwefwefwe".to_string(),
+            paths: vec![],
+            hostname: None,
+            username: None,
+            uid: None,
+            gid: None,
+            excludes: vec![],
+            tags: vec![],
+            original_id: None,
+            program_version: None,
+        };
+
+        cache.save_snapshot(&foo, example_tree_0()).unwrap();
+        cache.save_snapshot(&bar, example_tree_1()).unwrap();
+        cache.save_snapshot(&wat, example_tree_2()).unwrap();
+
+        test_snapshots(&cache, vec![&foo, &bar, &wat]);
+
         fn test_entries(cache: &Cache, sizetree: SizeTree) {
-            test_get_max_file_sizes(cache, sizetree.clone(), "");
-            test_get_max_file_sizes(cache, sizetree.clone(), "a");
-            test_get_max_file_sizes(cache, sizetree.clone(), "b");
-            test_get_max_file_sizes(cache, sizetree.clone(), "a/0");
-            test_get_max_file_sizes(cache, sizetree.clone(), "a/1");
-            test_get_max_file_sizes(cache, sizetree.clone(), "a/2");
-            test_get_max_file_sizes(cache, sizetree.clone(), "b/0");
-            test_get_max_file_sizes(cache, sizetree.clone(), "b/1");
-            test_get_max_file_sizes(cache, sizetree.clone(), "b/2");
-            test_get_max_file_sizes(cache, sizetree.clone(), "something");
-            test_get_max_file_sizes(cache, sizetree.clone(), "a/something");
+            test_get_max_file_sizes(cache, &sizetree, "");
+            test_get_max_file_sizes(cache, &sizetree, "a");
+            test_get_max_file_sizes(cache, &sizetree, "b");
+            test_get_max_file_sizes(cache, &sizetree, "a/0");
+            test_get_max_file_sizes(cache, &sizetree, "a/1");
+            test_get_max_file_sizes(cache, &sizetree, "a/2");
+            test_get_max_file_sizes(cache, &sizetree, "b/0");
+            test_get_max_file_sizes(cache, &sizetree, "b/1");
+            test_get_max_file_sizes(cache, &sizetree, "b/2");
+            test_get_max_file_sizes(cache, &sizetree, "something");
+            test_get_max_file_sizes(cache, &sizetree, "a/something");
         }
 
-        test_snapshots(&cache, vec!["foo", "bar", "wat"]);
         test_entries(
             &cache,
             example_tree_0().merge(example_tree_1()).merge(example_tree_2()),
@@ -328,7 +434,7 @@ fn cache_snapshots_entries() {
 
         // Deleting a non-existent snapshot does nothing
         cache.delete_snapshot("non-existent").unwrap();
-        test_snapshots(&cache, vec!["foo", "bar", "wat"]);
+        test_snapshots(&cache, vec![&foo, &bar, &wat]);
         test_entries(
             &cache,
             example_tree_0().merge(example_tree_1()).merge(example_tree_2()),
@@ -336,7 +442,7 @@ fn cache_snapshots_entries() {
 
         // Remove bar
         cache.delete_snapshot("bar").unwrap();
-        test_snapshots(&cache, vec!["foo", "wat"]);
+        test_snapshots(&cache, vec![&foo, &wat]);
         test_entries(&cache, example_tree_0().merge(example_tree_2()));
     });
 }
@@ -386,7 +492,15 @@ fn test_migrate_v0_to_v1() {
     let cache =
         Migrator::open_with_target(&file, 1).unwrap().migrate().unwrap();
 
-    assert_tables(&cache.conn, &["metadata_integer", "paths", "marks"]);
+    assert_tables(&cache.conn, &[
+        "metadata_integer",
+        "paths",
+        "snapshots",
+        "snapshot_paths",
+        "snapshot_excludes",
+        "snapshot_tags",
+        "marks",
+    ]);
 
     assert_marks(&cache, &marks);
 

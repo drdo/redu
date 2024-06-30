@@ -1,13 +1,18 @@
 use std::{collections::HashSet, path::Path};
 
 use camino::{Utf8Path, Utf8PathBuf};
+use chrono::DateTime;
 use log::trace;
 use rusqlite::{
-    functions::FunctionFlags, params, Connection, OptionalExtension, Row,
+    functions::FunctionFlags, params, types::FromSqlError, Connection,
+    OptionalExtension, Row,
 };
 use thiserror::Error;
 
-use crate::cache::filetree::SizeTree;
+use crate::{
+    cache::filetree::SizeTree,
+    restic::Snapshot,
+};
 
 pub mod filetree;
 #[cfg(any(test, feature = "bench"))]
@@ -26,14 +31,57 @@ pub enum OpenError {
     Migration(#[from] MigrationError),
 }
 
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("SQL error")]
+    Sql(#[from] rusqlite::Error),
+    #[error("Unexpected SQL datatype")]
+    FromSqlError(#[from] FromSqlError),
+    #[error("Error parsing JSON")]
+    Json(#[from] serde_json::Error),
+    #[error("Exhausted timestamp precision (a couple hundred thousand years after the epoch).")]
+    ExhaustedTimestampPrecision,
+}
+
 impl Cache {
-    pub fn get_snapshots(&self) -> Result<Vec<String>, rusqlite::Error> {
-        Ok(get_tables(&self.conn)?
-            .iter()
-            .filter_map(|name| {
-                name.strip_prefix("entries_").map(ToOwned::to_owned)
-            })
-            .collect())
+    pub fn get_snapshots(&self) -> Result<Vec<Snapshot>, Error> {
+        self.conn
+            .prepare(
+                "SELECT \
+                     hash, \
+                     time, \
+                     parent, \
+                     tree, \
+                     hostname, \
+                     username, \
+                     uid, \
+                     gid, \
+                     original_id, \
+                     program_version, \
+                     coalesce((SELECT json_group_array(path) FROM snapshot_paths WHERE hash = snapshots.hash), json_array()) as paths, \
+                     coalesce((SELECT json_group_array(path) FROM snapshot_excludes WHERE hash = snapshots.hash), json_array()) as excludes, \
+                     coalesce((SELECT json_group_array(tag) FROM snapshot_tags WHERE hash = snapshots.hash), json_array()) as tags \
+                 FROM snapshots")?
+            .query_and_then([], |row|
+                Ok(Snapshot {
+                    id: row.get("hash")?,
+                    time: DateTime::from_timestamp_micros(row.get("time")?)
+                        .map(Ok)
+                        .unwrap_or(Err(Error::ExhaustedTimestampPrecision))?,
+                    parent: row.get("parent")?,
+                    tree: row.get("tree")?,
+                    paths: serde_json::from_str(row.get_ref("paths")?.as_str()?)?,
+                    hostname: row.get("hostname")?,
+                    username: row.get("username")?,
+                    uid: row.get("uid")?,
+                    gid: row.get("gid")?,
+                    excludes: serde_json::from_str(row.get_ref("excludes")?.as_str()?)?,
+                    tags: serde_json::from_str(row.get_ref("tags")?.as_str()?)?,
+                    original_id: row.get("original_id")?,
+                    program_version: row.get("program_version")?,
+                })
+            )?
+            .collect()
     }
 
     pub fn get_parent_id(
@@ -123,14 +171,60 @@ impl Cache {
 
     pub fn save_snapshot(
         &mut self,
-        hash: impl AsRef<str>,
+        snapshot: &Snapshot,
         tree: SizeTree,
     ) -> Result<usize, rusqlite::Error> {
         let mut file_count = 0;
         let tx = self.conn.transaction()?;
         {
-            let entries_table = format!("entries_{}", hash.as_ref());
-
+            tx.execute(
+                "INSERT INTO snapshots ( \
+                     hash, \
+                     time, \
+                     parent, \
+                     tree, \
+                     hostname, \
+                     username, \
+                     uid, \
+                     gid, \
+                     original_id, \
+                     program_version \
+                 ) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                params![
+                    snapshot.id,
+                    snapshot.time.timestamp_micros(),
+                    snapshot.parent,
+                    snapshot.tree,
+                    snapshot.hostname,
+                    snapshot.username,
+                    snapshot.uid,
+                    snapshot.gid,
+                    snapshot.original_id,
+                    snapshot.program_version
+                ],
+            )?;
+            let mut snapshot_paths_stmt = tx.prepare(
+                "INSERT INTO snapshot_paths (hash, path) VALUES (?, ?)",
+            )?;
+            for path in snapshot.paths.iter() {
+                snapshot_paths_stmt.execute([&snapshot.id, path])?;
+            }
+            let mut snapshot_excludes_stmt = tx.prepare(
+                "INSERT INTO snapshot_excludes (hash, path) VALUES (?, ?)",
+            )?;
+            for path in snapshot.excludes.iter() {
+                snapshot_excludes_stmt.execute([&snapshot.id, path])?;
+            }
+            let mut snapshot_tags_stmt = tx.prepare(
+                "INSERT INTO snapshot_tags (hash, tag) VALUES (?, ?)",
+            )?;
+            for path in snapshot.tags.iter() {
+                snapshot_tags_stmt.execute([&snapshot.id, path])?;
+            }
+        }
+        {
+            let entries_table = format!("entries_{}", &snapshot.id);
             tx.execute(
                 &format!(
                     "CREATE TABLE \"{entries_table}\" (
@@ -142,6 +236,10 @@ impl Cache {
                 ),
                 [],
             )?;
+            let mut entries_stmt = tx.prepare(&format!(
+                "INSERT INTO \"{entries_table}\" (path_id, size, is_dir) \
+                 VALUES (?, ?, ?)",
+            ))?;
 
             let mut paths_stmt = tx.prepare(
                 "INSERT INTO paths (parent_id, component)
@@ -151,11 +249,6 @@ impl Cache {
             let mut paths_query = tx.prepare(
                 "SELECT id FROM paths WHERE parent_id = ? AND component = ?",
             )?;
-
-            let mut entries_stmt = tx.prepare(&format!(
-                "INSERT INTO \"{entries_table}\" (path_id, size, is_dir) \
-                 VALUES (?, ?, ?)",
-            ))?;
 
             tree.0.traverse_with_context(
                 |id_stack, component, size, is_dir| {
@@ -182,11 +275,14 @@ impl Cache {
         &mut self,
         hash: impl AsRef<str>,
     ) -> Result<(), rusqlite::Error> {
-        self.conn.execute(
-            &format!("DROP TABLE IF EXISTS \"entries_{}\"", hash.as_ref()),
-            [],
-        )?;
-        Ok(())
+        let hash = hash.as_ref();
+        let tx = self.conn.transaction()?;
+        tx.execute("DELETE FROM snapshots WHERE hash = ?", [hash])?;
+        tx.execute("DELETE FROM snapshot_paths WHERE hash = ?", [hash])?;
+        tx.execute("DELETE FROM snapshot_excludes WHERE hash = ?", [hash])?;
+        tx.execute("DELETE FROM snapshot_tags WHERE hash = ?", [hash])?;
+        tx.execute(&format!("DROP TABLE IF EXISTS \"entries_{}\"", hash), [])?;
+        tx.commit()
     }
 
     // Marks ////////////////////////////////////////////////
