@@ -9,6 +9,7 @@ use std::{
 };
 
 use camino::Utf8PathBuf;
+use chrono::{DateTime, Utc};
 use log::info;
 use scopeguard::defer;
 use serde::{de::DeserializeOwned, Deserialize};
@@ -270,6 +271,27 @@ impl<T: DeserializeOwned> Iterator for Iter<T> {
 #[derive(Clone, Debug, Deserialize)]
 pub struct Snapshot {
     pub id: String,
+    pub time: DateTime<Utc>,
+    #[serde(default)]
+    pub parent: Option<String>,
+    pub tree: String,
+    pub paths: Vec<String>,
+    #[serde(default)]
+    pub hostname: Option<String>,
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub uid: Option<u32>,
+    #[serde(default)]
+    pub gid: Option<u32>,
+    #[serde(default)]
+    pub excludes: Vec<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub original_id: Option<String>,
+    #[serde(default)]
+    pub program_version: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

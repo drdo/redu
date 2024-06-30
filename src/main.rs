@@ -38,7 +38,7 @@ use ratatui::{
 };
 use redu::{
     cache::{self, filetree::SizeTree, Cache, Migrator},
-    restic::{self, Restic},
+    restic::{self, Restic, Snapshot},
 };
 use scopeguard::defer;
 use thiserror::Error;
@@ -269,46 +269,41 @@ fn sync_snapshots(
     cache: &mut Cache,
     fetching_thread_count: usize,
 ) -> anyhow::Result<()> {
-    // Figure out what snapshots we need to fetch
-    let missing_snapshots: Vec<String> = {
-        // Fetch snapshot list
-        let pb = new_pb(" {spinner} Fetching repository snapshot list");
-        let repo_snapshots = restic
-            .snapshots()?
-            .into_iter()
-            .map(|s| s.id)
-            .collect::<Vec<String>>();
-        pb.finish();
+    let pb = new_pb(" {spinner} Fetching repository snapshot list");
+    let repo_snapshots = restic.snapshots()?;
+    pb.finish();
 
-        // Delete snapshots from the DB that were deleted on the repo
-        let snapshots_to_delete = cache
-            .get_snapshots()?
-            .into_iter()
-            .filter(|snapshot| !repo_snapshots.contains(snapshot))
-            .collect::<Vec<String>>();
-        if !snapshots_to_delete.is_empty() {
-            eprintln!(
-                "Need to delete {} snapshot(s)",
-                snapshots_to_delete.len()
-            );
-            let pb = new_pb(" {spinner} {wide_bar} [{pos}/{len}]");
-            pb.set_length(snapshots_to_delete.len() as u64);
-            for snapshot in snapshots_to_delete {
-                cache.delete_snapshot(snapshot)?;
-                pb.inc(1);
-            }
-            pb.finish();
+    let cache_snapshots = cache.get_snapshots()?;
+
+    // Delete snapshots from the DB that were deleted on the repo
+    let snapshots_to_delete: Vec<&Snapshot> = cache_snapshots
+        .iter()
+        .filter(|cache_snapshot| {
+            !repo_snapshots
+                .iter()
+                .any(|repo_snapshot| cache_snapshot.id == repo_snapshot.id)
+        })
+        .collect();
+    if !snapshots_to_delete.is_empty() {
+        eprintln!("Need to delete {} snapshot(s)", snapshots_to_delete.len());
+        let pb = new_pb(" {spinner} {wide_bar} [{pos}/{len}]");
+        pb.set_length(snapshots_to_delete.len() as u64);
+        for snapshot in snapshots_to_delete {
+            cache.delete_snapshot(&snapshot.id)?;
+            pb.inc(1);
         }
+        pb.finish();
+    }
 
-        let db_snapshots = cache.get_snapshots()?;
-        let mut missing_snapshots = repo_snapshots
-            .into_iter()
-            .filter(|s| !db_snapshots.contains(s))
-            .collect::<Vec<_>>();
-        missing_snapshots.shuffle(&mut thread_rng());
-        missing_snapshots
-    };
-
+    let mut missing_snapshots: Vec<Snapshot> = repo_snapshots
+        .into_iter()
+        .filter(|repo_snapshot| {
+            !cache_snapshots
+                .iter()
+                .any(|cache_snapshot| cache_snapshot.id == repo_snapshot.id)
+        })
+        .collect();
+    missing_snapshots.shuffle(&mut thread_rng());
     let total_missing_snapshots = match missing_snapshots.len() {
         0 => {
             eprintln!("Snapshots up to date");
@@ -316,7 +311,6 @@ fn sync_snapshots(
         }
         n => n,
     };
-
     let missing_queue = FixedSizeQueue::new(missing_snapshots);
 
     // Create progress indicators
@@ -344,7 +338,7 @@ fn sync_snapshots(
 
         // Channel to funnel snapshots from the fetching threads to the db thread
         let (snapshot_sender, snapshot_receiver) =
-            mpsc::sync_channel::<(String, SizeTree)>(fetching_thread_count);
+            mpsc::sync_channel::<(Snapshot, SizeTree)>(fetching_thread_count);
 
         // Start fetching threads
         for i in 0..fetching_thread_count {
@@ -402,20 +396,20 @@ enum FetchingThreadError {
 
 fn fetching_thread_body(
     restic: &Restic,
-    missing_queue: FixedSizeQueue<String>,
+    missing_queue: FixedSizeQueue<Snapshot>,
     mpb: MultiProgress,
-    snapshot_sender: mpsc::SyncSender<(String, SizeTree)>,
+    snapshot_sender: mpsc::SyncSender<(Snapshot, SizeTree)>,
     should_quit: Arc<AtomicBool>,
 ) -> Result<(), FetchingThreadError> {
     defer! { trace!("terminated") }
     trace!("started");
     while let Some(snapshot) = missing_queue.pop() {
-        let short_id = snapshot_short_id(&snapshot);
+        let short_id = snapshot_short_id(&snapshot.id);
         let pb =
             mpb_insert_end(&mpb, "   {spinner} fetching {prefix}: starting up")
                 .with_prefix(short_id.clone());
         let mut sizetree = SizeTree::new();
-        let files = restic.ls(&snapshot)?;
+        let files = restic.ls(&snapshot.id)?;
         trace!("started fetching snapshot ({short_id})");
         let start = Instant::now();
         for r in files {
@@ -464,7 +458,7 @@ fn db_thread_body(
     cache: &mut Cache,
     mpb: MultiProgress,
     main_pb: ProgressBar,
-    snapshot_receiver: mpsc::Receiver<(String, SizeTree)>,
+    snapshot_receiver: mpsc::Receiver<(Snapshot, SizeTree)>,
     should_quit: Arc<AtomicBool>,
     should_quit_poll_period: Duration,
 ) -> Result<(), DBThreadError> {
@@ -478,7 +472,7 @@ fn db_thread_body(
         let start = Instant::now();
         // We wait with timeout to poll the should_quit periodically
         match snapshot_receiver.recv_timeout(should_quit_poll_period) {
-            Ok((id, sizetree)) => {
+            Ok((snapshot, sizetree)) => {
                 info!(
                     "waited {}s to get snapshot",
                     start.elapsed().as_secs_f64()
@@ -487,7 +481,7 @@ fn db_thread_body(
                 if should_quit.load(Ordering::SeqCst) {
                     return Ok(());
                 }
-                let short_id = snapshot_short_id(&id);
+                let short_id = snapshot_short_id(&snapshot.id);
                 let pb = mpb_insert_after(
                     &mpb,
                     &main_pb,
@@ -495,7 +489,7 @@ fn db_thread_body(
                 )
                 .with_prefix(short_id.clone());
                 let start = Instant::now();
-                let file_count = cache.save_snapshot(id, sizetree)?;
+                let file_count = cache.save_snapshot(&snapshot, sizetree)?;
                 pb.finish_and_clear();
                 mpb.remove(&pb);
                 main_pb.inc(1);
