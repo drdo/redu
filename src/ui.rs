@@ -13,7 +13,7 @@ use ratatui::{
     style::{Style, Stylize},
     text::Span,
     widgets::{
-        Block, BorderType, Clear, List, ListItem, Padding, Paragraph, Widget,
+        Block, BorderType, Clear, Padding, Paragraph, Row, Table, Widget,
         WidgetRef, Wrap,
     },
 };
@@ -357,91 +357,67 @@ impl WidgetRef for ConfirmDialog {
 }
 
 /// Render /////////////////////////////////////////////////////////////////////
+const MARK_LEN: u16 = 1;
 
-struct ListEntry<'a> {
-    name: &'a str,
-    size: usize,
-    relative_size: f64,
-    is_dir: bool,
-    is_marked: bool,
+fn render_mark(is_marked: bool) -> Span<'static> {
+    Span::raw(if is_marked { "*" } else { " " })
 }
 
-impl<'a> ListEntry<'a> {
-    fn to_line(&self, width: u16, selected: bool) -> Line {
-        let mut spans = Vec::with_capacity(4);
+const SIZE_LEN: u16 = 11;
 
-        // Mark
-        spans.push(Span::raw(if self.is_marked { "*" } else { " " }));
+fn render_size(size: usize) -> Span<'static> {
+    Span::raw(format!(
+        "{:>11}",
+        humansize::format_size(size, humansize::BINARY)
+    ))
+}
 
-        // Size
-        spans.push(Span::raw(format!(
-            " {:>10}",
-            humansize::format_size(self.size, humansize::BINARY)
-        )));
+const SIZEBAR_LEN: u16 = 16;
 
-        // Bar
-        spans.push(
-            Span::raw({
-                const MAX_BAR_WIDTH: usize = 16;
-                let bar_frac_width =
-                    (self.relative_size * (MAX_BAR_WIDTH * 8) as f64) as usize;
-                let full_blocks = bar_frac_width / 8;
-                let last_block = match (bar_frac_width % 8) as u32 {
-                    0 => String::new(),
-                    x => String::from(unsafe {
-                        char::from_u32_unchecked(0x2590 - x)
-                    }),
-                };
-                let empty_width = MAX_BAR_WIDTH
-                    - full_blocks
-                    - last_block.graphemes(true).count();
-                let mut bar = String::with_capacity(1 + MAX_BAR_WIDTH + 1);
-                bar.push(' ');
-                for _ in 0..full_blocks {
-                    bar.push('\u{2588}');
-                }
-                bar.push_str(&last_block);
-                for _ in 0..empty_width {
-                    bar.push(' ');
-                }
-                bar.push(' ');
-                bar
-            })
-            .green(),
-        );
+fn render_sizebar(relative_size: f64) -> Span<'static> {
+    Span::raw({
+        let bar_frac_width =
+            (relative_size * (SIZEBAR_LEN * 8) as f64) as usize;
+        let full_blocks = bar_frac_width / 8;
+        let last_block = match (bar_frac_width % 8) as u32 {
+            0 => String::new(),
+            x => String::from(unsafe { char::from_u32_unchecked(0x2590 - x) }),
+        };
+        let empty_width =
+            SIZEBAR_LEN as usize - full_blocks - grapheme_len(&last_block);
+        let mut bar = String::with_capacity(1 + SIZEBAR_LEN as usize + 1);
+        for _ in 0..full_blocks {
+            bar.push('\u{2588}');
+        }
+        bar.push_str(&last_block);
+        for _ in 0..empty_width {
+            bar.push(' ');
+        }
+        bar
+    })
+    .green()
+}
 
-        // Name
-        spans.push({
-            let available_width = {
-                let used: usize = spans
-                    .iter()
-                    .map(|s| s.content.graphemes(true).count())
-                    .sum();
-                max(0, width as isize - used as isize) as usize
-            };
-            if self.is_dir {
-                let mut name = Cow::Borrowed(self.name);
-                if !name.ends_with('/') {
-                    name.to_mut().push('/');
-                }
-                let span =
-                    Span::raw(shorten_to(&name, available_width).into_owned())
-                        .bold();
-                if selected {
-                    span.dark_gray()
-                } else {
-                    span.blue()
-                }
-            } else {
-                Span::raw(shorten_to(self.name, available_width))
-            }
-        });
-
-        Line::from(spans).style(if selected {
-            Style::new().black().on_white()
+fn render_name(
+    name: &str,
+    is_dir: bool,
+    selected: bool,
+    available_width: usize,
+) -> Span {
+    if is_dir {
+        let mut name = Cow::Borrowed(name);
+        if !name.ends_with('/') {
+            name.to_mut().push('/');
+        }
+        let span =
+            Span::raw(shorten_to(&name, available_width).into_owned()).bold();
+        if selected {
+            span.dark_gray()
         } else {
-            Style::new()
-        })
+            span.blue()
+        }
+    } else {
+        Span::raw(shorten_to(name, available_width))
     }
 }
 
@@ -477,21 +453,51 @@ impl WidgetRef for App {
         }
 
         {
-            // List
-            let list_entries = to_list_entries(
-                |e| self.marks.contains(&self.full_path(e)),
-                self.entries.iter(),
-            );
-            let items =
-                list_entries.iter().enumerate().skip(self.offset).map(
-                    |(index, entry)| {
-                        ListItem::new(entry.to_line(
-                            self.list_size.width,
-                            index == self.selected,
-                        ))
-                    },
-                );
-            List::new(items).render_ref(list_rect, buf)
+            // Table
+            let mut rows: Vec<Row> = Vec::with_capacity(self.entries.len());
+            let mut entries = self.entries.iter();
+            if let Some(first) = entries.next() {
+                let largest_size = first.size as f64;
+                for (index, entry) in iter::once(first)
+                    .chain(entries)
+                    .enumerate()
+                    .skip(self.offset)
+                {
+                    let selected = index == self.selected;
+                    let mut cells: Vec<Span<'_>> = Vec::with_capacity(4);
+                    cells.push(render_mark(
+                        self.marks.contains(&self.full_path(entry)),
+                    ));
+                    cells.push(render_size(entry.size));
+                    cells
+                        .push(render_sizebar(entry.size as f64 / largest_size));
+                    let used_width: usize = cells
+                        .iter()
+                        .map(|s| s.content.graphemes(true).count())
+                        .sum();
+                    let available_width =
+                        max(0, list_rect.width as isize - used_width as isize)
+                            as usize;
+                    cells.push(render_name(
+                        &entry.component,
+                        entry.is_dir,
+                        selected,
+                        available_width,
+                    ));
+                    rows.push(Row::new(cells).style(if selected {
+                        Style::new().black().on_white()
+                    } else {
+                        Style::new()
+                    }));
+                }
+            }
+            Table::new(rows, [
+                Constraint::Min(MARK_LEN),
+                Constraint::Min(SIZE_LEN),
+                Constraint::Min(SIZEBAR_LEN),
+                Constraint::Percentage(100),
+            ])
+            .render_ref(list_rect, buf)
         }
 
         {
@@ -511,29 +517,6 @@ impl WidgetRef for App {
         if let Some(confirm_dialog) = &self.confirm_dialog {
             confirm_dialog.render_ref(area, buf);
         }
-    }
-}
-
-/// `entries` is expected to be sorted by size, largest first.
-fn to_list_entries<'a>(
-    mut is_marked: impl FnMut(&'a Entry) -> bool,
-    entries: impl IntoIterator<Item = &'a Entry>,
-) -> Vec<ListEntry<'a>> {
-    let mut entries = entries.into_iter();
-    if let Some(first) = entries.next() {
-        let largest = first.size as f64;
-        iter::once(first)
-            .chain(entries)
-            .map(|e @ Entry { component, size, is_dir, .. }| ListEntry {
-                name: component,
-                size: *size,
-                relative_size: *size as f64 / largest,
-                is_dir: *is_dir,
-                is_marked: is_marked(e),
-            })
-            .collect()
-    } else {
-        Vec::new()
     }
 }
 
@@ -558,7 +541,6 @@ fn shorten_to(s: &str, width: usize) -> Cow<str> {
 }
 
 /// Misc //////////////////////////////////////////////////////////////////////
-
 fn compute_list_size(area: Size) -> Size {
     let (_, list, _) = compute_layout((Position::new(0, 0), area).into());
     list.as_size()
@@ -588,6 +570,10 @@ fn centered(max_width: u16, max_height: u16, area: Rect) -> Rect {
     }
 }
 
+fn grapheme_len(s: &str) -> usize {
+    s.graphemes(true).count()
+}
+
 /// Tests //////////////////////////////////////////////////////////////////////
 
 #[cfg(test)]
@@ -597,173 +583,24 @@ mod tests {
     use super::{shorten_to, *};
 
     #[test]
-    fn list_entry_to_line_narrow_width() {
-        let f = ListEntry {
-            name: "1234567890123456789012345678901234567890",
-            size: 999 * 1024 + 1010,
-            relative_size: 0.9,
-            is_dir: false,
-            is_marked: false,
-        };
-        assert_eq!(
-            f.to_line(40, false),
-            Line::from(vec![
-                Span::raw(" "),
-                Span::raw(" 999.99 KiB"),
-                Span::raw(" ██████████████▍  ").green(),
-                Span::raw("123...7890")
-            ])
-        );
-    }
+    fn render_sizebar_test() {
+        fn aux(size: f64, content: &str) {
+            assert_eq!(render_sizebar(size).content, content);
+        }
 
-    #[test]
-    fn list_entry_to_line_large_size_file() {
-        let f = ListEntry {
-            name: "1234567890123456789012345678901234567890",
-            size: 999 * 1024 + 1010,
-            relative_size: 0.9,
-            is_dir: false,
-            is_marked: false,
-        };
-        assert_eq!(
-            f.to_line(80, false),
-            Line::from(vec![
-                Span::raw(" "),
-                Span::raw(" 999.99 KiB"),
-                Span::raw(" ██████████████▍  ").green(),
-                Span::raw("1234567890123456789012345678901234567890")
-            ])
-        );
-    }
-
-    #[test]
-    fn list_entry_to_line_small_size_file() {
-        let f = ListEntry {
-            name: "1234567890123456789012345678901234567890",
-            size: 9 * 1024,
-            relative_size: 0.9,
-            is_dir: false,
-            is_marked: false,
-        };
-        assert_eq!(
-            f.to_line(80, false),
-            Line::from(vec![
-                Span::raw(" "),
-                Span::raw("      9 KiB"),
-                Span::raw(" ██████████████▍  ").green(),
-                Span::raw("1234567890123456789012345678901234567890")
-            ])
-        );
-    }
-
-    #[test]
-    fn list_entry_to_line_directory() {
-        let f = ListEntry {
-            name: "1234567890123456789012345678901234567890",
-            size: 9 * 1024 + 1010,
-            relative_size: 0.9,
-            is_dir: true,
-            is_marked: false,
-        };
-        assert_eq!(
-            f.to_line(80, false),
-            Line::from(vec![
-                Span::raw(" "),
-                Span::raw("   9.99 KiB"),
-                Span::raw(" ██████████████▍  ").green(),
-                Span::raw("1234567890123456789012345678901234567890/")
-                    .bold()
-                    .blue()
-            ])
-        );
-    }
-
-    #[test]
-    fn list_entry_to_line_file_selected() {
-        let f = ListEntry {
-            name: "1234567890123456789012345678901234567890",
-            size: 999 * 1024 + 1010,
-            relative_size: 0.9,
-            is_dir: false,
-            is_marked: false,
-        };
-        assert_eq!(
-            f.to_line(80, true),
-            Line::from(vec![
-                Span::raw(" "),
-                Span::raw(" 999.99 KiB"),
-                Span::raw(" ██████████████▍  ").green(),
-                Span::raw("1234567890123456789012345678901234567890")
-            ])
-            .black()
-            .on_white()
-        );
-    }
-
-    #[test]
-    fn list_entry_to_line_directory_selected() {
-        let f = ListEntry {
-            name: "1234567890123456789012345678901234567890",
-            size: 9 * 1024 + 1010,
-            relative_size: 0.9,
-            is_dir: true,
-            is_marked: false,
-        };
-        assert_eq!(
-            f.to_line(80, true),
-            Line::from(vec![
-                Span::raw(" "),
-                Span::raw("   9.99 KiB"),
-                Span::raw(" ██████████████▍  ").green(),
-                Span::raw("1234567890123456789012345678901234567890/")
-                    .bold()
-                    .dark_gray()
-            ])
-            .black()
-            .on_white()
-        );
-    }
-
-    #[test]
-    fn list_entry_to_line_file_marked() {
-        let f = ListEntry {
-            name: "1234567890123456789012345678901234567890",
-            size: 999 * 1024 + 1010,
-            relative_size: 0.9,
-            is_dir: false,
-            is_marked: true,
-        };
-        assert_eq!(
-            f.to_line(80, false),
-            Line::from(vec![
-                Span::raw("*"),
-                Span::raw(" 999.99 KiB"),
-                Span::raw(" ██████████████▍  ").green(),
-                Span::raw("1234567890123456789012345678901234567890")
-            ])
-        );
-    }
-
-    #[test]
-    fn list_entry_to_line_file_marked_selected() {
-        let f = ListEntry {
-            name: "1234567890123456789012345678901234567890",
-            size: 999 * 1024 + 1010,
-            relative_size: 0.9,
-            is_dir: false,
-            is_marked: true,
-        };
-        assert_eq!(
-            f.to_line(80, true),
-            Line::from(vec![
-                Span::raw("*"),
-                Span::raw(" 999.99 KiB"),
-                Span::raw(" ██████████████▍  ").green(),
-                Span::raw("1234567890123456789012345678901234567890")
-            ])
-            .black()
-            .on_white()
-        );
+        aux(0.00, "                ");
+        aux(0.25, "████            ");
+        aux(0.50, "████████        ");
+        aux(0.75, "████████████    ");
+        aux(0.90, "██████████████▍ ");
+        aux(1.00, "████████████████");
+        aux(0.5 + (1.0 / (8.0 * 16.0)), "████████▏       ");
+        aux(0.5 + (2.0 / (8.0 * 16.0)), "████████▎       ");
+        aux(0.5 + (3.0 / (8.0 * 16.0)), "████████▍       ");
+        aux(0.5 + (4.0 / (8.0 * 16.0)), "████████▌       ");
+        aux(0.5 + (5.0 / (8.0 * 16.0)), "████████▋       ");
+        aux(0.5 + (6.0 / (8.0 * 16.0)), "████████▊       ");
+        aux(0.5 + (7.0 / (8.0 * 16.0)), "████████▉       ");
     }
 
     #[test]
