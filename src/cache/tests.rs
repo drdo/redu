@@ -505,4 +505,6 @@ fn test_migrate_v0_to_v1() {
     assert_marks(&cache, &marks);
 
     assert_eq!(determine_version(&cache.conn).unwrap(), Some(1));
+
+    cache_snapshots_entries();
 }
