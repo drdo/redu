@@ -473,8 +473,9 @@ impl WidgetRef for App {
                         .push(render_sizebar(entry.size as f64 / largest_size));
                     let used_width: usize = cells
                         .iter()
-                        .map(|s| s.content.graphemes(true).count())
-                        .sum();
+                        .map(|s| grapheme_len(&s.content))
+                        .sum::<usize>()
+                        + cells.len(); // separators
                     let available_width =
                         max(0, list_rect.width as isize - used_width as isize)
                             as usize;
@@ -575,7 +576,6 @@ fn grapheme_len(s: &str) -> usize {
 }
 
 /// Tests //////////////////////////////////////////////////////////////////////
-
 #[cfg(test)]
 mod tests {
     use std::borrow::Cow;
