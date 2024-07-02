@@ -464,28 +464,32 @@ impl WidgetRef for App {
                     .skip(self.offset)
                 {
                     let selected = index == self.selected;
-                    let mut cells: Vec<Span<'_>> = Vec::with_capacity(4);
-                    cells.push(render_mark(
+                    let mark_span = render_mark(
                         self.marks.contains(&self.full_path(entry)),
-                    ));
-                    cells.push(render_size(entry.size));
-                    cells
-                        .push(render_sizebar(entry.size as f64 / largest_size));
-                    let used_width: usize = cells
-                        .iter()
-                        .map(|s| grapheme_len(&s.content))
-                        .sum::<usize>()
-                        + cells.len(); // separators
+                    );
+                    let size_span = render_size(entry.size);
+                    let sizebar_span =
+                        render_sizebar(entry.size as f64 / largest_size);
+                    let used_width: usize = grapheme_len(&mark_span.content)
+                        + grapheme_len(&size_span.content)
+                        + grapheme_len(&sizebar_span.content)
+                        + 3; // separators
                     let available_width =
                         max(0, list_rect.width as isize - used_width as isize)
                             as usize;
-                    cells.push(render_name(
+                    let name_span = render_name(
                         &entry.component,
                         entry.is_dir,
                         selected,
                         available_width,
-                    ));
-                    rows.push(Row::new(cells).style(if selected {
+                    );
+                    let row = Row::new(vec![
+                        mark_span,
+                        size_span,
+                        sizebar_span,
+                        name_span,
+                    ]);
+                    rows.push(row.style(if selected {
                         Style::new().black().on_white()
                     } else {
                         Style::new()
