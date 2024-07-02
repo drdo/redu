@@ -122,7 +122,7 @@ impl Cache {
     /// This returns the children files/directories of the given path.
     /// Each entry's size is the largest size of that file/directory across
     /// all snapshots.
-    pub fn get_max_file_sizes(
+    pub fn get_entries(
         &self,
         path_id: Option<PathId>,
     ) -> Result<Vec<Entry>, rusqlite::Error> {

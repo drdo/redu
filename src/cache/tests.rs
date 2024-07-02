@@ -321,7 +321,7 @@ fn cache_snapshots_entries() {
                     vec![]
                 } else {
                     cache
-                        .get_max_file_sizes(path_id)
+                        .get_entries(path_id)
                         .unwrap()
                         .into_iter()
                         .map(|e| (e.component, e.size, e.is_dir))

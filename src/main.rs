@@ -195,7 +195,7 @@ fn main() -> anyhow::Result<()> {
             rect.as_size(),
             None,
             Utf8PathBuf::new(),
-            cache.get_max_file_sizes(None)?,
+            cache.get_entries(None)?,
             cache.get_marks().unwrap(),
             vec![
                 "m".bold(),
@@ -232,11 +232,11 @@ fn main() -> anyhow::Result<()> {
                 Action::GetParentEntries(path_id) => {
                     let parent_id = cache.get_parent_id(path_id)?
                         .expect("The UI requested a GetParentEntries with a path_id that does not exist");
-                    let entries = cache.get_max_file_sizes(parent_id)?;
+                    let entries = cache.get_entries(parent_id)?;
                     Some(Event::Entries { path_id: parent_id, entries })
                 }
                 Action::GetEntries(path_id) => {
-                    let entries = cache.get_max_file_sizes(path_id)?;
+                    let entries = cache.get_entries(path_id)?;
                     Some(Event::Entries { path_id, entries })
                 }
                 Action::UpsertMark(path) => {
