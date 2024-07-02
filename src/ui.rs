@@ -280,145 +280,21 @@ impl App {
     }
 }
 
-/// ConfirmDialog //////////////////////////////////////////////////////////////
-struct ConfirmDialog {
-    text: String,
-    yes: String,
-    no: String,
-    yes_selected: bool,
-    action: Action,
+fn compute_list_size(area: Size) -> Size {
+    let (_, list, _) = compute_layout((Position::new(0, 0), area).into());
+    list.as_size()
 }
 
-impl WidgetRef for ConfirmDialog {
-    fn render_ref(&self, area: Rect, buf: &mut Buffer) {
-        let main_text = Paragraph::new(self.text.clone())
-            .centered()
-            .wrap(Wrap { trim: false });
-
-        let padding = Padding { left: 2, right: 2, top: 1, bottom: 0 };
-        let horiz_padding = padding.left + padding.right;
-        let vert_padding = padding.top + padding.bottom;
-        let dialog_area = {
-            let max_text_width = min(80, area.width - 2 - horiz_padding); // take out the border and padding
-            let text_width =
-                min(self.text.graphemes(true).count() as u16, max_text_width);
-            let text_height = main_text.line_count(max_text_width) as u16;
-            let max_width = text_width + 2 + horiz_padding; // text + border + padding
-            let max_height = text_height + 2 + vert_padding + 1 + 2 + 1; // text + border + padding + empty line + buttons
-            centered(max_width, max_height, area)
-        };
-
-        let block = Block::bordered().title("Confirm").padding(padding);
-
-        let (main_text_area, buttons_area) = {
-            let layout = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Fill(100), Constraint::Length(3)])
-                .split(block.inner(dialog_area));
-            (layout[0], layout[1])
-        };
-        let (no_button_area, yes_button_area) = {
-            let layout = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([
-                    Constraint::Fill(1),
-                    Constraint::Min(self.no.graphemes(true).count() as u16),
-                    Constraint::Fill(1),
-                    Constraint::Min(self.yes.graphemes(true).count() as u16),
-                    Constraint::Fill(1),
-                ])
-                .split(buttons_area);
-            (layout[1], layout[3])
-        };
-
-        fn render_button(
-            label: &str,
-            selected: bool,
-            area: Rect,
-            buf: &mut Buffer,
-        ) {
-            let mut block = Block::bordered().border_type(BorderType::Plain);
-            let mut button =
-                Paragraph::new(label).centered().wrap(Wrap { trim: false });
-            if selected {
-                block = block.border_type(BorderType::QuadrantInside);
-                button = button.black().on_white();
-            }
-            button.render(block.inner(area), buf);
-            block.render(area, buf);
-        }
-
-        Clear.render(dialog_area, buf);
-        block.render(dialog_area, buf);
-        main_text.render(main_text_area, buf);
-        render_button(&self.no, !self.yes_selected, no_button_area, buf);
-        render_button(&self.yes, self.yes_selected, yes_button_area, buf);
-    }
-}
-
-/// Render /////////////////////////////////////////////////////////////////////
-const MARK_LEN: u16 = 1;
-
-fn render_mark(is_marked: bool) -> Span<'static> {
-    Span::raw(if is_marked { "*" } else { " " })
-}
-
-const SIZE_LEN: u16 = 11;
-
-fn render_size(size: usize) -> Span<'static> {
-    Span::raw(format!(
-        "{:>11}",
-        humansize::format_size(size, humansize::BINARY)
-    ))
-}
-
-const SIZEBAR_LEN: u16 = 16;
-
-fn render_sizebar(relative_size: f64) -> Span<'static> {
-    Span::raw({
-        let bar_frac_width =
-            (relative_size * (SIZEBAR_LEN * 8) as f64) as usize;
-        let full_blocks = bar_frac_width / 8;
-        let last_block = match (bar_frac_width % 8) as u32 {
-            0 => String::new(),
-            x => String::from(unsafe { char::from_u32_unchecked(0x2590 - x) }),
-        };
-        let empty_width =
-            SIZEBAR_LEN as usize - full_blocks - grapheme_len(&last_block);
-        let mut bar = String::with_capacity(1 + SIZEBAR_LEN as usize + 1);
-        for _ in 0..full_blocks {
-            bar.push('\u{2588}');
-        }
-        bar.push_str(&last_block);
-        for _ in 0..empty_width {
-            bar.push(' ');
-        }
-        bar
-    })
-    .green()
-}
-
-fn render_name(
-    name: &str,
-    is_dir: bool,
-    selected: bool,
-    available_width: usize,
-) -> Span {
-    if is_dir {
-        let mut name = Cow::Borrowed(name);
-        if !name.ends_with('/') {
-            name.to_mut().push('/');
-        }
-        let span =
-            Span::raw(shorten_to(&name, available_width).into_owned()).bold();
-        if selected {
-            span.dark_gray()
-        } else {
-            span.blue()
-        }
-    } else {
-        Span::raw(shorten_to(name, available_width))
-    }
+fn compute_layout(area: Rect) -> (Rect, Rect, Rect) {
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Fill(100),
+            Constraint::Length(1),
+        ])
+        .split(area);
+    (layout[0], layout[1], layout[2])
 }
 
 impl WidgetRef for App {
@@ -525,6 +401,70 @@ impl WidgetRef for App {
     }
 }
 
+const MARK_LEN: u16 = 1;
+
+fn render_mark(is_marked: bool) -> Span<'static> {
+    Span::raw(if is_marked { "*" } else { " " })
+}
+
+const SIZE_LEN: u16 = 11;
+
+fn render_size(size: usize) -> Span<'static> {
+    Span::raw(format!(
+        "{:>11}",
+        humansize::format_size(size, humansize::BINARY)
+    ))
+}
+
+const SIZEBAR_LEN: u16 = 16;
+
+fn render_sizebar(relative_size: f64) -> Span<'static> {
+    Span::raw({
+        let bar_frac_width =
+            (relative_size * (SIZEBAR_LEN * 8) as f64) as usize;
+        let full_blocks = bar_frac_width / 8;
+        let last_block = match (bar_frac_width % 8) as u32 {
+            0 => String::new(),
+            x => String::from(unsafe { char::from_u32_unchecked(0x2590 - x) }),
+        };
+        let empty_width =
+            SIZEBAR_LEN as usize - full_blocks - grapheme_len(&last_block);
+        let mut bar = String::with_capacity(1 + SIZEBAR_LEN as usize + 1);
+        for _ in 0..full_blocks {
+            bar.push('\u{2588}');
+        }
+        bar.push_str(&last_block);
+        for _ in 0..empty_width {
+            bar.push(' ');
+        }
+        bar
+    })
+    .green()
+}
+
+fn render_name(
+    name: &str,
+    is_dir: bool,
+    selected: bool,
+    available_width: usize,
+) -> Span {
+    if is_dir {
+        let mut name = Cow::Borrowed(name);
+        if !name.ends_with('/') {
+            name.to_mut().push('/');
+        }
+        let span =
+            Span::raw(shorten_to(&name, available_width).into_owned()).bold();
+        if selected {
+            span.dark_gray()
+        } else {
+            span.blue()
+        }
+    } else {
+        Span::raw(shorten_to(name, available_width))
+    }
+}
+
 fn shorten_to(s: &str, width: usize) -> Cow<str> {
     let len = s.graphemes(true).count();
     let res = if len <= width {
@@ -545,24 +485,84 @@ fn shorten_to(s: &str, width: usize) -> Cow<str> {
     res
 }
 
+/// ConfirmDialog //////////////////////////////////////////////////////////////
+struct ConfirmDialog {
+    text: String,
+    yes: String,
+    no: String,
+    yes_selected: bool,
+    action: Action,
+}
+
+impl WidgetRef for ConfirmDialog {
+    fn render_ref(&self, area: Rect, buf: &mut Buffer) {
+        let main_text = Paragraph::new(self.text.clone())
+            .centered()
+            .wrap(Wrap { trim: false });
+
+        let padding = Padding { left: 2, right: 2, top: 1, bottom: 0 };
+        let horiz_padding = padding.left + padding.right;
+        let vert_padding = padding.top + padding.bottom;
+        let dialog_area = {
+            let max_text_width = min(80, area.width - 2 - horiz_padding); // take out the border and padding
+            let text_width =
+                min(self.text.graphemes(true).count() as u16, max_text_width);
+            let text_height = main_text.line_count(max_text_width) as u16;
+            let max_width = text_width + 2 + horiz_padding; // text + border + padding
+            let max_height = text_height + 2 + vert_padding + 1 + 2 + 1; // text + border + padding + empty line + buttons
+            centered(max_width, max_height, area)
+        };
+
+        let block = Block::bordered().title("Confirm").padding(padding);
+
+        let (main_text_area, buttons_area) = {
+            let layout = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Fill(100), Constraint::Length(3)])
+                .split(block.inner(dialog_area));
+            (layout[0], layout[1])
+        };
+        let (no_button_area, yes_button_area) = {
+            let layout = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([
+                    Constraint::Fill(1),
+                    Constraint::Min(self.no.graphemes(true).count() as u16),
+                    Constraint::Fill(1),
+                    Constraint::Min(self.yes.graphemes(true).count() as u16),
+                    Constraint::Fill(1),
+                ])
+                .split(buttons_area);
+            (layout[1], layout[3])
+        };
+
+        fn render_button(
+            label: &str,
+            selected: bool,
+            area: Rect,
+            buf: &mut Buffer,
+        ) {
+            let mut block = Block::bordered().border_type(BorderType::Plain);
+            let mut button =
+                Paragraph::new(label).centered().wrap(Wrap { trim: false });
+            if selected {
+                block = block.border_type(BorderType::QuadrantInside);
+                button = button.black().on_white();
+            }
+            button.render(block.inner(area), buf);
+            block.render(area, buf);
+        }
+
+        Clear.render(dialog_area, buf);
+        block.render(dialog_area, buf);
+        main_text.render(main_text_area, buf);
+        render_button(&self.no, !self.yes_selected, no_button_area, buf);
+        render_button(&self.yes, self.yes_selected, yes_button_area, buf);
+    }
+}
+
 /// Misc //////////////////////////////////////////////////////////////////////
-fn compute_list_size(area: Size) -> Size {
-    let (_, list, _) = compute_layout((Position::new(0, 0), area).into());
-    list.as_size()
-}
-
-fn compute_layout(area: Rect) -> (Rect, Rect, Rect) {
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Fill(100),
-            Constraint::Length(1),
-        ])
-        .split(area);
-    (layout[0], layout[1], layout[2])
-}
-
+ 
 /// Returns a `Rect` centered in `area` with a maximum width and height.
 fn centered(max_width: u16, max_height: u16, area: Rect) -> Rect {
     let width = min(max_width, area.width);
