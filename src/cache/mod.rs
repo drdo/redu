@@ -213,7 +213,7 @@ impl Cache {
                 max_size AS (
                     SELECT hash, size
                     FROM rich_entries
-                    ORDER BY size DESC
+                    ORDER BY size DESC, time DESC
                     LIMIT 1) \
              SELECT \
                  max_size.size AS max_size, \
