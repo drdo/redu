@@ -84,10 +84,15 @@ You can mark files and directories to build up your list of things to exclude.
 Keybinds
 - **m**: mark selected file/directory
 - **u**: unmark selected file/directory
-- **c**: clear all marks
+- **c**: clear all marks (this will prompt you for confirmation)
  
 The marks are persistent across runs of redu (they are saved in the cache file),
 so feel free to mark a few files and just quit and come back later.
+
+The marks are shown with an asterik at the beginning of the line
+and you can see how many total marks you have on the bar at the bottom.
+
+![Screenshot of redu showing the contents of a repo with some marks](screenshot_marks.png)
 
 ### Generating the excludes
 Press **g** to exit redu and generate a list with all of your marks in alphabetic order to stdout.
