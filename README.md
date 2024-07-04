@@ -54,7 +54,7 @@ It will be much faster the next time as it no longer needs to fetch the entire r
 
 After some time you will see something like this:
 
-![Screenshot of redu showing the contents of a repo with some marks active](screenshot.png)
+![Screenshot of redu showing the contents of a repo](screenshot_start.png)
 
 You can navigate using the **arrow keys** or **hjkl**.
 Going right enters a directory and going left leaves back to the parent.
