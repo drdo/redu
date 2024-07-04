@@ -200,6 +200,8 @@ fn main() -> anyhow::Result<()> {
             cache.get_entries(None)?,
             cache.get_marks().unwrap(),
             vec![
+                "Enter".bold(),
+                ":Details  ".into(),
                 "m".bold(),
                 ":Mark  ".into(),
                 "u".bold(),
