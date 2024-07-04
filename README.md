@@ -54,7 +54,7 @@ It will be much faster the next time as it no longer needs to fetch the entire r
 
 After some time you will see something like this:
 
-![Screenshot of redu showing the contents of a repo with some marks active](screenshot.png)
+![Screenshot of redu showing the contents of a repo](screenshot_start.png)
 
 You can navigate using the **arrow keys** or **hjkl**.
 Going right enters a directory and going left leaves back to the parent.
@@ -68,15 +68,31 @@ where it is the biggest.
 The bars indicate the relative size of the item compared to everything else
 in the current location.
 
+By pressing **Enter** you can make a small window visible that shows some details
+about the currently highlighted item:
+- The latest snapshot where it has maximum size
+- The earliest date and snapshot where this item appears
+- The latest date and snapshot where this item appears
+
+![Screenshot of redu showing the contents of a repo with details open](screenshot_details.png)
+
+You can keep navigating with the details window open and it will update as you
+browse around.
+
 ### Marking files 
 You can mark files and directories to build up your list of things to exclude.
 Keybinds
 - **m**: mark selected file/directory
 - **u**: unmark selected file/directory
-- **c**: clear all marks
+- **c**: clear all marks (this will prompt you for confirmation)
  
 The marks are persistent across runs of redu (they are saved in the cache file),
 so feel free to mark a few files and just quit and come back later.
+
+The marks are shown with an asterik at the beginning of the line
+and you can see how many total marks you have on the bar at the bottom.
+
+![Screenshot of redu showing the contents of a repo with some marks](screenshot_marks.png)
 
 ### Generating the excludes
 Press **g** to exit redu and generate a list with all of your marks in alphabetic order to stdout.

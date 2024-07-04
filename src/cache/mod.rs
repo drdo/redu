@@ -1,7 +1,7 @@
 use std::{collections::HashSet, path::Path};
 
 use camino::{Utf8Path, Utf8PathBuf};
-use chrono::DateTime;
+use chrono::{DateTime, Utc};
 use log::trace;
 use rusqlite::{
     functions::FunctionFlags, params, types::FromSqlError, Connection,
@@ -62,9 +62,7 @@ impl Cache {
             .query_and_then([], |row|
                 Ok(Snapshot {
                     id: row.get("hash")?,
-                    time: DateTime::from_timestamp_micros(row.get("time")?)
-                        .map(Ok)
-                        .unwrap_or(Err(Error::ExhaustedTimestampPrecision))?,
+                    time: timestamp_to_datetime(row.get("time")?)?,
                     parent: row.get("parent")?,
                     tree: row.get("tree")?,
                     paths: serde_json::from_str(row.get_ref("paths")?.as_str()?)?,
@@ -122,7 +120,7 @@ impl Cache {
     /// This returns the children files/directories of the given path.
     /// Each entry's size is the largest size of that file/directory across
     /// all snapshots.
-    pub fn get_max_file_sizes(
+    pub fn get_entries(
         &self,
         path_id: Option<PathId>,
     ) -> Result<Vec<Entry>, rusqlite::Error> {
@@ -166,6 +164,71 @@ impl Cache {
         rows.collect()
     }
 
+    pub fn get_entry_details(
+        &self,
+        path_id: PathId,
+    ) -> Result<EntryDetails, Error> {
+        let aux = |row: &Row| -> Result<EntryDetails, Error> {
+            Ok(EntryDetails {
+                max_size: row.get("max_size")?,
+                max_size_snapshot_hash: row.get("max_size_snapshot_hash")?,
+                first_seen: timestamp_to_datetime(row.get("first_seen")?)?,
+                first_seen_snapshot_hash: row
+                    .get("first_seen_snapshot_hash")?,
+                last_seen: timestamp_to_datetime(row.get("last_seen")?)?,
+                last_seen_snapshot_hash: row.get("last_seen_snapshot_hash")?,
+            })
+        };
+        let raw_path_id = path_id.0;
+        let rich_entries_cte = get_tables(&self.conn)?
+            .iter()
+            .filter_map(|name| name.strip_prefix("entries_"))
+            .map(|snapshot_hash| {
+                format!(
+                    "SELECT \
+                         hash, \
+                         size, \
+                         time \
+                     FROM \"entries_{snapshot_hash}\" \
+                         JOIN paths ON path_id = paths.id \
+                         JOIN snapshots ON hash = '{snapshot_hash}' \
+                     WHERE path_id = {raw_path_id}\n"
+                )
+            })
+            .intersperse(String::from(" UNION ALL "))
+            .collect::<String>();
+        let query = format!(
+            "WITH \
+                rich_entries AS ({rich_entries_cte}), \
+                first_seen AS (
+                    SELECT hash, time
+                    FROM rich_entries
+                    ORDER BY time ASC
+                    LIMIT 1), \
+                last_seen AS (
+                    SELECT hash, time
+                    FROM rich_entries
+                    ORDER BY time DESC
+                    LIMIT 1), \
+                max_size AS (
+                    SELECT hash, size
+                    FROM rich_entries
+                    ORDER BY size DESC, time DESC
+                    LIMIT 1) \
+             SELECT \
+                 max_size.size AS max_size, \
+                 max_size.hash AS max_size_snapshot_hash, \
+                 first_seen.time AS first_seen, \
+                 first_seen.hash as first_seen_snapshot_hash, \
+                 last_seen.time AS last_seen, \
+                 last_seen.hash as last_seen_snapshot_hash \
+             FROM max_size
+             JOIN first_seen ON 1=1
+             JOIN last_seen ON 1=1"
+        );
+        self.conn.query_row_and_then(&query, [], aux)
+    }
+
     pub fn save_snapshot(
         &mut self,
         snapshot: &Snapshot,
@@ -190,7 +253,7 @@ impl Cache {
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
                     snapshot.id,
-                    snapshot.time.timestamp_micros(),
+                    datetime_to_timestamp(snapshot.time),
                     snapshot.parent,
                     snapshot.tree,
                     snapshot.hostname,
@@ -339,6 +402,16 @@ pub struct Entry {
     pub component: String,
     pub size: usize,
     pub is_dir: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct EntryDetails {
+    pub max_size: usize,
+    pub max_size_snapshot_hash: String,
+    pub first_seen: DateTime<Utc>,
+    pub first_seen_snapshot_hash: String,
+    pub last_seen: DateTime<Utc>,
+    pub last_seen_snapshot_hash: String,
 }
 
 ////////// Migrations //////////////////////////////////////////////////////////
@@ -512,4 +585,15 @@ fn get_tables(conn: &Connection) -> Result<HashSet<String>, rusqlite::Error> {
         conn.prepare("SELECT name FROM sqlite_master WHERE type='table'")?;
     let names = stmt.query_map([], |row| row.get(0))?;
     names.collect()
+}
+
+////////// Misc ////////////////////////////////////////////////////////////////
+fn timestamp_to_datetime(timestamp: i64) -> Result<DateTime<Utc>, Error> {
+    DateTime::from_timestamp_micros(timestamp)
+        .map(Ok)
+        .unwrap_or(Err(Error::ExhaustedTimestampPrecision))
+}
+
+fn datetime_to_timestamp(datetime: DateTime<Utc>) -> i64 {
+    datetime.timestamp_micros()
 }

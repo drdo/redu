@@ -321,7 +321,7 @@ fn cache_snapshots_entries() {
                     vec![]
                 } else {
                     cache
-                        .get_max_file_sizes(path_id)
+                        .get_entries(path_id)
                         .unwrap()
                         .into_iter()
                         .map(|e| (e.component, e.size, e.is_dir))
@@ -505,4 +505,6 @@ fn test_migrate_v0_to_v1() {
     assert_marks(&cache, &marks);
 
     assert_eq!(determine_version(&cache.conn).unwrap(), Some(1));
+
+    cache_snapshots_entries();
 }
