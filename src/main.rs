@@ -42,10 +42,12 @@ use redu::{
 };
 use scopeguard::defer;
 use thiserror::Error;
+use util::snapshot_short_id;
 
 use crate::ui::{Action, App, Event};
 
 mod ui;
+mod util;
 
 /// This is like ncdu for a restic respository.
 ///
@@ -239,6 +241,8 @@ fn main() -> anyhow::Result<()> {
                     let entries = cache.get_entries(path_id)?;
                     Some(Event::Entries { path_id, entries })
                 }
+                Action::GetEntryDetails(path_id) =>
+                    Some(Event::EntryDetails(cache.get_entry_details(path_id)?)),
                 Action::UpsertMark(path) => {
                     cache.upsert_mark(&path)?;
                     Some(Event::Marks(cache.get_marks()?))
@@ -604,10 +608,6 @@ fn mpb_insert_end(mpb: &MultiProgress, template: &str) -> ProgressBar {
     let pb = mpb.add(pb);
     pb.enable_steady_tick(PB_TICK_INTERVAL);
     pb
-}
-
-fn snapshot_short_id(id: &str) -> String {
-    id.chars().take(7).collect::<String>()
 }
 
 #[derive(Clone)]

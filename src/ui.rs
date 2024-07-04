@@ -17,9 +17,13 @@ use ratatui::{
         WidgetRef, Wrap,
     },
 };
+use redu::cache::EntryDetails;
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::cache::{Entry, PathId};
+use crate::{
+    cache::{Entry, PathId},
+    util::snapshot_short_id,
+};
 
 #[derive(Clone, Debug)]
 pub enum Event {
@@ -42,6 +46,7 @@ pub enum Event {
         path_id: Option<PathId>,
         entries: Vec<Entry>,
     },
+    EntryDetails(EntryDetails),
     Marks(Vec<Utf8PathBuf>),
 }
 
@@ -53,6 +58,7 @@ pub enum Action {
     Generate(Vec<Utf8PathBuf>),
     GetParentEntries(PathId),
     GetEntries(Option<PathId>),
+    GetEntryDetails(PathId),
     UpsertMark(Utf8PathBuf),
     DeleteMark(Utf8PathBuf),
     DeleteAllMarks,
@@ -67,6 +73,7 @@ pub struct App {
     selected: usize,
     offset: usize,
     footer_extra: Vec<Span<'static>>,
+    details_drawer: Option<DetailsDrawer>,
     confirm_dialog: Option<ConfirmDialog>,
 }
 
@@ -90,6 +97,7 @@ impl App {
             selected: 0,
             offset: 0,
             footer_extra,
+            details_drawer: None,
             confirm_dialog: None,
         }
     }
@@ -126,11 +134,15 @@ impl App {
                     } else {
                         Action::Render
                     }
+                } else if self.confirm_dialog.is_none() {
+                    Action::GetEntryDetails(self.entries[self.selected].path_id)
                 } else {
                     Action::Nothing
                 },
             Exit =>
-                if self.confirm_dialog.take().is_some() {
+                if self.confirm_dialog.take().is_some()
+                    || self.details_drawer.take().is_some()
+                {
                     Action::Render
                 } else {
                     Action::Nothing
@@ -154,6 +166,10 @@ impl App {
             Quit => Action::Quit,
             Generate => self.generate(),
             Entries { path_id, entries } => self.set_entries(path_id, entries),
+            EntryDetails(details) => {
+                self.details_drawer = Some(DetailsDrawer { details });
+                Action::Render
+            }
             Marks(new_marks) => self.set_marks(new_marks),
         }
     }
@@ -196,7 +212,11 @@ impl App {
         } as usize;
         self.fix_offset();
 
-        Action::Render
+        if self.details_drawer.is_some() {
+            Action::GetEntryDetails(self.entries[self.selected].path_id)
+        } else {
+            Action::Render
+        }
     }
 
     fn mark_selection(&mut self) -> Action {
@@ -241,7 +261,12 @@ impl App {
         }
         self.entries = entries;
         self.fix_offset();
-        Action::Render
+
+        if self.details_drawer.is_some() {
+            Action::GetEntryDetails(self.entries[self.selected].path_id)
+        } else {
+            Action::Render
+        }
     }
 
     fn set_marks(&mut self, new_marks: Vec<Utf8PathBuf>) -> Action {
@@ -299,7 +324,7 @@ fn compute_layout(area: Rect) -> (Rect, Rect, Rect) {
 
 impl WidgetRef for App {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
-        let (header_rect, list_rect, footer_rect) = compute_layout(area);
+        let (header_area, table_area, footer_area) = compute_layout(area);
         {
             // Header
             let mut string = "--- ".to_string();
@@ -310,14 +335,14 @@ impl WidgetRef for App {
                     } else {
                         self.path.as_str()
                     },
-                    max(0, header_rect.width as isize - string.len() as isize)
+                    max(0, header_area.width as isize - string.len() as isize)
                         as usize,
                 )
                 .as_ref(),
             );
             let mut remaining_width = max(
                 0,
-                header_rect.width as isize
+                header_area.width as isize
                     - string.graphemes(true).count() as isize,
             ) as usize;
             if remaining_width > 0 {
@@ -325,7 +350,7 @@ impl WidgetRef for App {
                 remaining_width -= 1;
             }
             string.push_str(&"-".repeat(remaining_width));
-            Paragraph::new(string).on_light_blue().render_ref(header_rect, buf);
+            Paragraph::new(string).on_light_blue().render_ref(header_area, buf);
         }
 
         {
@@ -351,7 +376,7 @@ impl WidgetRef for App {
                         + grapheme_len(&sizebar_span.content)
                         + 3; // separators
                     let available_width =
-                        max(0, list_rect.width as isize - used_width as isize)
+                        max(0, table_area.width as isize - used_width as isize)
                             as usize;
                     let name_span = render_name(
                         &entry.component,
@@ -378,7 +403,7 @@ impl WidgetRef for App {
                 Constraint::Min(SIZEBAR_LEN),
                 Constraint::Percentage(100),
             ])
-            .render_ref(list_rect, buf)
+            .render_ref(table_area, buf)
         }
 
         {
@@ -392,7 +417,11 @@ impl WidgetRef for App {
             .collect::<Vec<_>>();
             Paragraph::new(Line::from(spans))
                 .on_light_blue()
-                .render_ref(footer_rect, buf);
+                .render_ref(footer_area, buf);
+        }
+
+        if let Some(details_dialog) = &self.details_drawer {
+            details_dialog.render_ref(table_area, buf);
         }
 
         if let Some(confirm_dialog) = &self.confirm_dialog {
@@ -485,6 +514,53 @@ fn shorten_to(s: &str, width: usize) -> Cow<str> {
     res
 }
 
+/// DetailsDialog //////////////////////////////////////////////////////////////
+struct DetailsDrawer {
+    details: EntryDetails,
+}
+
+impl WidgetRef for DetailsDrawer {
+    fn render_ref(&self, area: Rect, buf: &mut Buffer) {
+        let details = &self.details;
+        let text = format!(
+            "max size: {} ({})\n\
+             first seen: {} ({})\n\
+             last seen: {} ({})\n",
+            humansize::format_size(details.max_size, humansize::BINARY),
+            snapshot_short_id(&details.max_size_snapshot_hash),
+            details.first_seen.date_naive(),
+            snapshot_short_id(&details.first_seen_snapshot_hash),
+            details.last_seen.date_naive(),
+            snapshot_short_id(&details.last_seen_snapshot_hash),
+        );
+        let paragraph = Paragraph::new(text).wrap(Wrap { trim: false });
+        let padding = Padding { left: 2, right: 2, top: 0, bottom: 0 };
+        let horiz_padding = padding.left + padding.right;
+        let inner_width = {
+            let desired_inner_width = paragraph.line_width() as u16;
+            let max_inner_width = area.width.saturating_sub(2 + horiz_padding);
+            min(max_inner_width, desired_inner_width)
+        };
+        let outer_width = inner_width + 2 + horiz_padding;
+        let outer_height = {
+            let vert_padding = padding.top + padding.bottom;
+            let inner_height = paragraph.line_count(inner_width) as u16;
+            inner_height + 2 + vert_padding
+        };
+        let block_area = Rect {
+            x: area.x + area.width - outer_width,
+            y: area.y + area.height - outer_height,
+            width: outer_width,
+            height: outer_height,
+        };
+        let block = Block::bordered().title("Details").padding(padding);
+        let paragraph_area = block.inner(block_area);
+        Clear.render(block_area, buf);
+        block.render(block_area, buf);
+        paragraph.render(paragraph_area, buf);
+    }
+}
+
 /// ConfirmDialog //////////////////////////////////////////////////////////////
 struct ConfirmDialog {
     text: String,
@@ -501,17 +577,9 @@ impl WidgetRef for ConfirmDialog {
             .wrap(Wrap { trim: false });
 
         let padding = Padding { left: 2, right: 2, top: 1, bottom: 0 };
-        let horiz_padding = padding.left + padding.right;
-        let vert_padding = padding.top + padding.bottom;
-        let dialog_area = {
-            let max_text_width = min(80, area.width - 2 - horiz_padding); // take out the border and padding
-            let text_width =
-                min(self.text.graphemes(true).count() as u16, max_text_width);
-            let text_height = main_text.line_count(max_text_width) as u16;
-            let max_width = text_width + 2 + horiz_padding; // text + border + padding
-            let max_height = text_height + 2 + vert_padding + 1 + 2 + 1; // text + border + padding + empty line + buttons
-            centered(max_width, max_height, area)
-        };
+        let width = min(80, grapheme_len(&self.text) as u16);
+        let height = main_text.line_count(width) as u16 + 1 + 3; // text + empty line + buttons
+        let dialog_area = dialog(padding, width, height, area);
 
         let block = Block::bordered().title("Confirm").padding(padding);
 
@@ -562,7 +630,19 @@ impl WidgetRef for ConfirmDialog {
 }
 
 /// Misc //////////////////////////////////////////////////////////////////////
- 
+fn dialog(
+    padding: Padding,
+    max_inner_width: u16,
+    max_inner_height: u16,
+    area: Rect,
+) -> Rect {
+    let horiz_padding = padding.left + padding.right;
+    let vert_padding = padding.top + padding.bottom;
+    let max_width = max_inner_width + 2 + horiz_padding; // The extra 2 is the border
+    let max_height = max_inner_height + 2 + vert_padding;
+    centered(max_width, max_height, area)
+}
+
 /// Returns a `Rect` centered in `area` with a maximum width and height.
 fn centered(max_width: u16, max_height: u16, area: Rect) -> Rect {
     let width = min(max_width, area.width);
