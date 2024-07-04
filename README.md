@@ -68,6 +68,17 @@ where it is the biggest.
 The bars indicate the relative size of the item compared to everything else
 in the current location.
 
+By pressing **Enter** you can make a small window visible that shows some details
+about the currently highlighted item:
+- The latest snapshot where it has maximum size
+- The earliest date and snapshot where this item appears
+- The latest date and snapshot where this item appears
+
+![Screenshot of redu showing the contents of a repo with details open](screenshot_details.png)
+
+You can keep navigating with the details window open and it will update as you
+browse around.
+
 ### Marking files 
 You can mark files and directories to build up your list of things to exclude.
 Keybinds
