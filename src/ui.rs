@@ -477,20 +477,41 @@ fn render_name(
     selected: bool,
     available_width: usize,
 ) -> Span {
+    let mut escaped = escape_name(name);
     if is_dir {
-        let mut name = Cow::Borrowed(name);
-        if !name.ends_with('/') {
-            name.to_mut().push('/');
+        if !escaped.ends_with('/') {
+            escaped.to_mut().push('/');
         }
         let span =
-            Span::raw(shorten_to(&name, available_width).into_owned()).bold();
+            Span::raw(shorten_to(&escaped, available_width).into_owned()).bold();
         if selected {
             span.dark_gray()
         } else {
             span.blue()
         }
     } else {
-        Span::raw(shorten_to(name, available_width))
+        Span::raw(shorten_to(&escaped, available_width).into_owned())
+    }
+}
+
+fn escape_name(name: &str) -> Cow<str> {
+    match name.find(char::is_control) {
+        None => Cow::Borrowed(name),
+        Some(index) => {
+            let (left, right) = name.split_at(index);
+            let mut escaped = String::with_capacity(name.len()+1); // the +1 is for the extra \
+            escaped.push_str(left);
+            for c in right.chars() {
+                if c.is_control() {
+                    for d in c.escape_default() {
+                        escaped.push(d);
+                    }
+                } else {
+                    escaped.push(c)
+                }
+            }
+            Cow::Owned(escaped)
+        }
     }
 }
 
@@ -685,6 +706,11 @@ mod tests {
         aux(0.5 + (5.0 / (8.0 * 16.0)), "████████▋       ");
         aux(0.5 + (6.0 / (8.0 * 16.0)), "████████▊       ");
         aux(0.5 + (7.0 / (8.0 * 16.0)), "████████▉       ");
+    }
+
+    #[test]
+    fn escape_name_test() {
+        assert_eq!(escape_name("f\no\\tóà 学校\r"), Cow::Borrowed("f\\no\\tóà 学校\\r"));
     }
 
     #[test]
