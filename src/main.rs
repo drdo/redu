@@ -38,7 +38,7 @@ use ratatui::{
 };
 use redu::{
     cache::{self, filetree::SizeTree, Cache, Migrator},
-    restic::{self, Restic, Snapshot},
+    restic::{self, escape_for_exclude, Restic, Snapshot},
 };
 use scopeguard::defer;
 use thiserror::Error;
@@ -216,7 +216,7 @@ fn main() -> anyhow::Result<()> {
         )
     };
 
-    let mut output_lines = vec![];
+    let mut output_paths = vec![];
 
     render(&mut terminal, &app)?;
     'outer: loop {
@@ -229,8 +229,8 @@ fn main() -> anyhow::Result<()> {
                     None
                 }
                 Action::Quit => break 'outer,
-                Action::Generate(lines) => {
-                    output_lines = lines;
+                Action::Generate(paths) => {
+                    output_paths = paths;
                     break 'outer;
                 }
                 Action::GetParentEntries(path_id) => {
@@ -264,8 +264,8 @@ fn main() -> anyhow::Result<()> {
     disable_raw_mode()?;
     stderr().execute(LeaveAlternateScreen)?;
 
-    for line in output_lines {
-        println!("{line}");
+    for line in output_paths {
+        println!("{}", escape_for_exclude(line.as_str()));
     }
     Ok(())
 }

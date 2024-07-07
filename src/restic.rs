@@ -1,7 +1,9 @@
 use std::{
+    borrow::Cow,
     ffi::OsStr,
     fmt::{Display, Formatter},
     io::{BufRead, BufReader, Lines, Read},
+    iter::Step,
     marker::PhantomData,
     os::unix::process::CommandExt,
     process::{Child, ChildStdout, Command, ExitStatusError, Stdio},
@@ -298,4 +300,72 @@ pub struct Snapshot {
 pub struct File {
     pub path: Utf8PathBuf,
     pub size: usize,
+}
+
+pub fn escape_for_exclude(path: &str) -> Cow<str> {
+    fn is_special(c: char) -> bool {
+        ['*', '?', '[', '\\', '\r', '\n'].contains(&c)
+    }
+
+    fn push_as_inverse_range(buf: &mut String, c: char) {
+        #[rustfmt::skip]
+        let cs = [
+            '[', '^', 
+            char::MIN, '-', char::backward(c, 1),
+            char::forward(c, 1), '-', char::MAX,
+            ']',
+        ];
+        for d in cs {
+            buf.push(d);
+        }
+    }
+
+    match path.find(is_special) {
+        None => Cow::Borrowed(path),
+        Some(index) => {
+            let (left, right) = path.split_at(index);
+            let mut escaped = String::with_capacity(path.len() + 1); // the +1 is for the extra \
+            escaped.push_str(left);
+            for c in right.chars() {
+                match c {
+                    '*' => escaped.push_str("[*]"),
+                    '?' => escaped.push_str("[?]"),
+                    '[' => escaped.push_str("[[]"),
+                    '\\' => {
+                        #[cfg(target_os = "windows")]
+                        escaped.push('\\');
+                        #[cfg(not(target_os = "windows"))]
+                        escaped.push_str("\\\\");
+                    }
+                    '\r' => push_as_inverse_range(&mut escaped, '\r'),
+                    '\n' => push_as_inverse_range(&mut escaped, '\n'),
+                    c => escaped.push(c),
+                }
+            }
+            Cow::Owned(escaped)
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::escape_for_exclude;
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn escape_for_exclude_test() {
+        assert_eq!(
+            escape_for_exclude("foo* bar?[somethin\\g]]]\r\n"),
+            "foo[*] bar[?][[]somethin\\\\g]]][^\0-\u{000C}\u{000E}-\u{10FFFF}][^\0-\u{0009}\u{000B}-\u{10FFFF}]"
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn escape_for_exclude_test() {
+        assert_eq!(
+            escape_for_exclude("foo* bar?[somethin\\g]]]\r\n"),
+            "foo[*] bar[?][[]somethin\\g]]][^\0-\u{000C}\u{000E}-\u{10FFFF}][^\0-\u{0009}\u{000B}-\u{10FFFF}]"
+        );
+    }
 }

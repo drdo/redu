@@ -483,7 +483,8 @@ fn render_name(
             escaped.to_mut().push('/');
         }
         let span =
-            Span::raw(shorten_to(&escaped, available_width).into_owned()).bold();
+            Span::raw(shorten_to(&escaped, available_width).into_owned())
+                .bold();
         if selected {
             span.dark_gray()
         } else {
@@ -499,7 +500,7 @@ fn escape_name(name: &str) -> Cow<str> {
         None => Cow::Borrowed(name),
         Some(index) => {
             let (left, right) = name.split_at(index);
-            let mut escaped = String::with_capacity(name.len()+1); // the +1 is for the extra \
+            let mut escaped = String::with_capacity(name.len() + 1); // the +1 is for the extra \
             escaped.push_str(left);
             for c in right.chars() {
                 if c.is_control() {
@@ -683,8 +684,6 @@ fn grapheme_len(s: &str) -> usize {
 /// Tests //////////////////////////////////////////////////////////////////////
 #[cfg(test)]
 mod tests {
-    use std::borrow::Cow;
-
     use super::{shorten_to, *};
 
     #[test]
@@ -710,7 +709,10 @@ mod tests {
 
     #[test]
     fn escape_name_test() {
-        assert_eq!(escape_name("f\no\\tóà 学校\r"), Cow::Borrowed("f\\no\\tóà 学校\\r"));
+        assert_eq!(
+            escape_name("f\no\\tóà 学校\r"),
+            Cow::Borrowed("f\\no\\tóà 学校\\r")
+        );
     }
 
     #[test]
