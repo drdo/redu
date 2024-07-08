@@ -91,3 +91,66 @@ jobs:
       uses: diamondburned/action-upload-release@v0.0.1
       with:
         files: ${{needs.set-env.outputs.name}}-${{needs.set-env.outputs.version}}-darwin-arm64.bz2
+  build-windows-x86_64:
+    needs: set-env
+    runs-on: windows-2022
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build
+      run: cargo build --release --verbose
+    - name: Run tests
+      run: cargo test --verbose
+    - name: Compress
+      run: >
+        Compress-Archive
+        target/release/${{needs.set-env.outputs.name}}.exe
+        ${{needs.set-env.outputs.name}}-${{needs.set-env.outputs.version}}-windows-x86_64.zip
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-x86_64-release
+        path: ${{needs.set-env.outputs.name}}-${{needs.set-env.outputs.version}}-windows-x86_64.zip
+  upload-windows-x86_64:
+    needs: [set-env, build-windows-x86_64]
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Download artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: windows-x86_64-release
+    - name: Upload
+      uses: diamondburned/action-upload-release@v0.0.1
+      with:
+        files: ${{needs.set-env.outputs.name}}-${{needs.set-env.outputs.version}}-windows-x86_64.zip
+  build-windows-arm64:
+    needs: set-env
+    runs-on: windows-2022
+    steps:
+    - uses: actions/checkout@v4
+    - name: Add aarch64-pc-windows-msvc target
+      run: |
+        rustup target add aarch64-pc-windows-msvc
+    - name: Build
+      run: cargo build --release --target=aarch64-pc-windows-msvc --verbose
+    - name: Compress
+      run: >
+        Compress-Archive
+        target/aarch64-pc-windows-msvc/release/${{needs.set-env.outputs.name}}.exe
+        ${{needs.set-env.outputs.name}}-${{needs.set-env.outputs.version}}-windows-arm64.zip
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-arm64-release
+        path: ${{needs.set-env.outputs.name}}-${{needs.set-env.outputs.version}}-windows-arm64.zip
+  upload-windows-arm64:
+    needs: [set-env, build-windows-arm64]
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Download artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: windows-arm64-release
+    - name: Upload
+      uses: diamondburned/action-upload-release@v0.0.1
+      with:
+        files: ${{needs.set-env.outputs.name}}-${{needs.set-env.outputs.version}}-windows-arm64.zip
