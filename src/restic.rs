@@ -1,3 +1,5 @@
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::process::CommandExt;
 use std::{
     borrow::Cow,
     ffi::OsStr,
@@ -5,7 +7,6 @@ use std::{
     io::{BufRead, BufReader, Lines, Read},
     iter::Step,
     marker::PhantomData,
-    os::unix::process::CommandExt,
     process::{Child, ChildStdout, Command, ExitStatusError, Stdio},
     str::Utf8Error,
 };
@@ -179,6 +180,7 @@ impl Restic {
     ) -> Result<Child, LaunchError> {
         let mut cmd = Command::new("restic");
         // Need to detach process from terminal
+        #[cfg(not(target_os = "windows"))]
         unsafe {
             cmd.pre_exec(|| {
                 nix::unistd::setsid()?;
