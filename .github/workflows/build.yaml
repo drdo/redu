@@ -10,7 +10,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build-linux-amd64:
+  build-linux-x86_64:
     runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v4
@@ -35,7 +35,7 @@ jobs:
       run: cargo install cross
     - name: Build
       run: cross build --target aarch64-unknown-linux-musl --verbose
-  build-darwin-amd64:
+  build-darwin-x86_64:
     runs-on: macos-13
     steps:
     - uses: actions/checkout@v4
@@ -47,7 +47,7 @@ jobs:
     - uses: actions/checkout@v4
     - name: Build
       run: cargo build --verbose
-  build-windows-amd64:
+  build-windows-x86_64:
     runs-on: windows-2022
     steps:
     - uses: actions/checkout@v4
