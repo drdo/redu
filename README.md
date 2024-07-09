@@ -16,6 +16,8 @@ You can either grab a pre-built binary from Github, currently available for:
 - Darwin (MacOS) x86-64
 - Linux arm64
 - Linux x86-64
+- Windows arm64
+- Windows x86-64
 
 Note: On MacOS if you download via browser you might need to remove quarantine with:
 `xattr -d com.apple.quarantine <binary name>`
