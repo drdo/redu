@@ -330,17 +330,18 @@ pub fn escape_for_exclude(path: &str) -> Cow<str> {
             escaped.push_str(left);
             for c in right.chars() {
                 match c {
-                    '*' => escaped.push_str("[*]"),
-                    '?' => escaped.push_str("[?]"),
-                    '[' => escaped.push_str("[[]"),
+                    '*' | '?' | '[' => {
+                        escaped.push('[');
+                        escaped.push(c);
+                        escaped.push(']');
+                    }
                     '\\' => {
                         #[cfg(target_os = "windows")]
                         escaped.push('\\');
                         #[cfg(not(target_os = "windows"))]
                         escaped.push_str("\\\\");
                     }
-                    '\r' => push_as_inverse_range(&mut escaped, '\r'),
-                    '\n' => push_as_inverse_range(&mut escaped, '\n'),
+                    '\r' | '\n' => push_as_inverse_range(&mut escaped, c),
                     c => escaped.push(c),
                 }
             }
