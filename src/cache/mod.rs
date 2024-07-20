@@ -149,6 +149,9 @@ impl Cache {
             })
             .intersperse(String::from(" UNION ALL "))
             .collect::<String>();
+        if cte_stmt_string.is_empty() {
+            return Ok(vec![]);
+        }
         let mut stmt = self.conn.prepare(&format!(
             "WITH rich_entries AS ({cte_stmt_string}) \
              SELECT \

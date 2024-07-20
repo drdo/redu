@@ -177,6 +177,12 @@ fn main() -> anyhow::Result<()> {
 
     sync_snapshots(&restic, &mut cache, cli.fetching_thread_count)?;
 
+    let entries = cache.get_entries(None)?;
+    if entries.is_empty() {
+        eprintln!("The repository has no snapshots!");
+        return Ok(());
+    }
+
     // UI
     stderr().execute(EnterAlternateScreen)?;
     panic::update_hook(|prev, info| {
@@ -197,7 +203,7 @@ fn main() -> anyhow::Result<()> {
             rect.as_size(),
             None,
             Utf8PathBuf::new(),
-            cache.get_entries(None)?,
+            entries,
             cache.get_marks().unwrap(),
             vec![
                 "Enter".bold(),
@@ -310,6 +316,7 @@ fn sync_snapshots(
         })
         .collect();
     missing_snapshots.shuffle(&mut thread_rng());
+    missing_snapshots = vec![];
     let total_missing_snapshots = match missing_snapshots.len() {
         0 => {
             eprintln!("Snapshots up to date");
