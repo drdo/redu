@@ -316,7 +316,6 @@ fn sync_snapshots(
         })
         .collect();
     missing_snapshots.shuffle(&mut thread_rng());
-    missing_snapshots = vec![];
     let total_missing_snapshots = match missing_snapshots.len() {
         0 => {
             eprintln!("Snapshots up to date");
