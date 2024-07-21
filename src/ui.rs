@@ -355,6 +355,8 @@ impl WidgetRef for App {
 
         {
             // Table
+            const MIN_WIDTH_SHOW_SIZEBAR: u16 = 50;
+            let show_sizebar = table_area.width >= MIN_WIDTH_SHOW_SIZEBAR;
             let mut rows: Vec<Row> = Vec::with_capacity(self.entries.len());
             let mut entries = self.entries.iter();
             if let Some(first) = entries.next() {
@@ -365,45 +367,45 @@ impl WidgetRef for App {
                     .skip(self.offset)
                 {
                     let selected = index == self.selected;
-                    let mark_span = render_mark(
+                    let mut spans = Vec::with_capacity(4);
+                    spans.push(render_mark(
                         self.marks.contains(&self.full_path(entry)),
-                    );
-                    let size_span = render_size(entry.size);
-                    let sizebar_span =
-                        render_sizebar(entry.size as f64 / largest_size);
-                    let used_width: usize = grapheme_len(&mark_span.content)
-                        + grapheme_len(&size_span.content)
-                        + grapheme_len(&sizebar_span.content)
-                        + 3; // separators
+                    ));
+                    spans.push(render_size(entry.size));
+                    if show_sizebar {
+                        spans.push(render_sizebar(
+                            entry.size as f64 / largest_size,
+                        ));
+                    }
+                    let used_width: usize = spans
+                        .iter()
+                        .map(|s| grapheme_len(&s.content))
+                        .sum::<usize>()
+                        + spans.len(); // separators
                     let available_width =
                         max(0, table_area.width as isize - used_width as isize)
                             as usize;
-                    let name_span = render_name(
+                    spans.push(render_name(
                         &entry.component,
                         entry.is_dir,
                         selected,
                         available_width,
-                    );
-                    let row = Row::new(vec![
-                        mark_span,
-                        size_span,
-                        sizebar_span,
-                        name_span,
-                    ]);
-                    rows.push(row.style(if selected {
+                    ));
+                    rows.push(Row::new(spans).style(if selected {
                         Style::new().black().on_white()
                     } else {
                         Style::new()
                     }));
                 }
             }
-            Table::new(rows, [
-                Constraint::Min(MARK_LEN),
-                Constraint::Min(SIZE_LEN),
-                Constraint::Min(SIZEBAR_LEN),
-                Constraint::Percentage(100),
-            ])
-            .render_ref(table_area, buf)
+            let mut constraints = Vec::with_capacity(4);
+            constraints.push(Constraint::Min(MARK_LEN));
+            constraints.push(Constraint::Min(SIZE_LEN));
+            if show_sizebar {
+                constraints.push(Constraint::Min(SIZEBAR_LEN));
+            }
+            constraints.push(Constraint::Percentage(100));
+            Table::new(rows, constraints).render_ref(table_area, buf)
         }
 
         {
