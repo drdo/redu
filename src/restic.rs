@@ -320,7 +320,7 @@ pub fn escape_for_exclude(path: &str) -> Cow<str> {
     fn push_as_inverse_range(buf: &mut String, c: char) {
         #[rustfmt::skip]
         let cs = [
-            '[', '^', 
+            '[', '^',
             char::MIN, '-', char::backward(c, 1),
             char::forward(c, 1), '-', char::MAX,
             ']',
