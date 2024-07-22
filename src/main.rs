@@ -82,31 +82,31 @@ mod util;
 struct Cli {
     #[arg(short = 'r', long)]
     repo: Option<String>,
+
     #[arg(long)]
     password_command: Option<String>,
-    #[arg(
-        short = 'j',
-        long,
-        default_value_t = 4,
-        long_help = "
-            How many restic subprocesses to spawn concurrently.
 
-            If you get ssh-related errors or too much memory use
-            try lowering this."
-    )]
-    fetching_thread_count: usize,
+    ///  How many restic subprocesses to spawn concurrently.
+    ///
+    /// If you get ssh-related errors or too much memory use try lowering this.
+    #[arg(short = 'j', value_name = "NUMBER", default_value_t = 4)]
+    parallelism: usize,
+
+    /// Log verbosity level. You can pass it multiple times (maxes out at two).
     #[arg(
         short = 'v',
         action = clap::ArgAction::Count,
-        long_help =
-            "Log verbosity level. You can pass it multiple times (maxes out at two)."
     )]
     verbose: u8,
+
+    /// Pass the --no-cache option to restic subprocesses.
+    #[arg(long)]
+    no_cache: bool,
 }
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let restic = Restic::new(cli.repo, cli.password_command);
+    let restic = Restic::new(cli.repo, cli.password_command, cli.no_cache);
 
     let dirs = ProjectDirs::from("eu", "drdo", "redu")
         .expect("unable to determine project directory");
@@ -175,7 +175,7 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    sync_snapshots(&restic, &mut cache, cli.fetching_thread_count)?;
+    sync_snapshots(&restic, &mut cache, cli.parallelism)?;
 
     let entries = cache.get_entries(None)?;
     if entries.is_empty() {

@@ -97,11 +97,16 @@ pub struct Config {
 pub struct Restic {
     repo: Option<String>,
     password_command: Option<String>,
+    no_cache: bool,
 }
 
 impl Restic {
-    pub fn new(repo: Option<String>, password_command: Option<String>) -> Self {
-        Restic { repo, password_command }
+    pub fn new(
+        repo: Option<String>,
+        password_command: Option<String>,
+        no_cache: bool,
+    ) -> Self {
+        Restic { repo, password_command, no_cache }
     }
 
     pub fn config(&self) -> Result<Config, Error> {
@@ -192,6 +197,9 @@ impl Restic {
         }
         if let Some(password_command) = &self.password_command {
             cmd.arg("--password-command").arg(password_command);
+        }
+        if self.no_cache {
+            cmd.arg("--no-cache");
         }
         cmd.arg("--json");
         cmd.args(args);
@@ -312,7 +320,7 @@ pub fn escape_for_exclude(path: &str) -> Cow<str> {
     fn push_as_inverse_range(buf: &mut String, c: char) {
         #[rustfmt::skip]
         let cs = [
-            '[', '^', 
+            '[', '^',
             char::MIN, '-', char::backward(c, 1),
             char::forward(c, 1), '-', char::MAX,
             ']',
