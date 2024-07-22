@@ -102,11 +102,15 @@ struct Cli {
             "Log verbosity level. You can pass it multiple times (maxes out at two)."
     )]
     verbose: u8,
+
+    /// Pass the --no-cache option to restic subprocesses.
+    #[arg(long)]
+    no_cache: bool,
 }
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let restic = Restic::new(cli.repo, cli.password_command);
+    let restic = Restic::new(cli.repo, cli.password_command, cli.no_cache);
 
     let dirs = ProjectDirs::from("eu", "drdo", "redu")
         .expect("unable to determine project directory");
