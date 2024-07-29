@@ -14,7 +14,7 @@ description = "This is like ncdu for a restic repository."
 anyhow = "1"
 camino = "1"
 chrono = { version = "0.4", features = ["serde"] }
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 crossterm = "0.27"
 directories = "5"
 flexi_logger = "0.28"

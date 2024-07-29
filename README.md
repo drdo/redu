@@ -30,20 +30,23 @@ Note: it currently requires nightly to build.
  
 # Running
  
-You can use all the regular restic environment variables, they will be passed
-to all restic subprocesses redu spawns.
+You can specify the repository and the password command in exactly the same ways
+that restic supports, with the exception that redu will not prompt you for the password.
 
-For example:
+For example using environment variables:
 ```
 $ export RESTIC_REPOSITORY='sftp://my-backup-server.my-domain.net'
 $ export RESTIC_PASSWORD_COMMAND='security find-generic-password -s restic -a personal -w'
 $ redu 
 ```
 
-Alternatively, you can pass the repo and the password as arguments to redu:
+Or via command line arguments:
 ```
 redu -r 'sftp://my-backup-server.my-domain.net' --password-command 'security find-generic-password -s restic -a personal -w' 
 ```
+
+Note: `--repository-file` (env: `RESTIC_REPOSITORY_FILE`) and `--password-file` (env: `RESTIC_PASSWORD_FILE`)
+are supported as well and work just like in restic.
 
 # Usage
 Redu keeps a cache with your file/directory sizes (per repo).
@@ -80,6 +83,8 @@ about the currently highlighted item:
 
 You can keep navigating with the details window open and it will update as you
 browse around.
+
+Hint: you can press **Escape** to close the details window (as well as other dialogs).
 
 ### Marking files 
 You can mark files and directories to build up your list of things to exclude.
