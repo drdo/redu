@@ -83,7 +83,7 @@ struct Cli {
     #[arg(short = 'r', long)]
     repo: Option<String>,
 
-    #[arg(long)]
+    #[arg(long, value_name = "COMMAND")]
     password_command: Option<String>,
 
     ///  How many restic subprocesses to spawn concurrently.
