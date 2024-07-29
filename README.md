@@ -81,6 +81,8 @@ about the currently highlighted item:
 You can keep navigating with the details window open and it will update as you
 browse around.
 
+Hint: you can press **Escape** to close the details window (as well as other dialogs).
+
 ### Marking files 
 You can mark files and directories to build up your list of things to exclude.
 Keybinds
