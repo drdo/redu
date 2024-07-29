@@ -14,8 +14,8 @@ use std::{
 };
 
 use anyhow::Context;
+use args::Args;
 use camino::{Utf8Path, Utf8PathBuf};
-use clap::{command, Parser};
 use crossterm::{
     event::{KeyCode, KeyModifiers},
     terminal::{
@@ -25,7 +25,7 @@ use crossterm::{
     ExecutableCommand,
 };
 use directories::ProjectDirs;
-use flexi_logger::{FileSpec, LogSpecification, Logger, WriteMode};
+use flexi_logger::{FileSpec, Logger, WriteMode};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::{error, info, trace};
 use rand::{seq::SliceRandom, thread_rng};
@@ -46,67 +46,13 @@ use util::snapshot_short_id;
 
 use crate::ui::{Action, App, Event};
 
+mod args;
 mod ui;
 mod util;
 
-/// This is like ncdu for a restic respository.
-///
-/// It computes the size for each directory/file by
-/// taking the largest over all snapshots in the repository.
-///
-/// You can browse your repository and mark directories/files.
-/// These marks are persisted across runs of redu.
-///
-/// When you're happy with the marks you can generate
-/// a list to stdout with everything that you marked.
-///   This list can be used directly as an exclude-file for restic.
-///
-/// Redu keeps all messages and UI in stderr,
-/// only the marks list is generated to stdout.
-///   This means that you can pipe redu directly to a file
-/// to get the exclude-file.
-///
-/// NOTE: redu will never do any kind of modification to your repo.
-/// It's strictly read-only.
-///
-/// Keybinds:
-/// Arrows or hjkl: Movement
-/// PgUp/PgDown or C-b/C-f: Page up / Page down
-/// m: Mark
-/// u: Unmark
-/// c: Clear all marks
-/// g: Generate
-/// q: Quit
-#[derive(Parser)]
-#[command(version, long_about, verbatim_doc_comment)]
-struct Cli {
-    #[arg(short = 'r', long)]
-    repo: Option<String>,
-
-    #[arg(long, value_name = "COMMAND")]
-    password_command: Option<String>,
-
-    ///  How many restic subprocesses to spawn concurrently.
-    ///
-    /// If you get ssh-related errors or too much memory use try lowering this.
-    #[arg(short = 'j', value_name = "NUMBER", default_value_t = 4)]
-    parallelism: usize,
-
-    /// Log verbosity level. You can pass it multiple times (maxes out at two).
-    #[arg(
-        short = 'v',
-        action = clap::ArgAction::Count,
-    )]
-    verbose: u8,
-
-    /// Pass the --no-cache option to restic subprocesses.
-    #[arg(long)]
-    no_cache: bool,
-}
-
 fn main() -> anyhow::Result<()> {
-    let cli = Cli::parse();
-    let restic = Restic::new(cli.repo, cli.password_command, cli.no_cache);
+    let args = Args::parse();
+    let restic = Restic::new(args.repo, args.password, args.no_cache);
 
     let dirs = ProjectDirs::from("eu", "drdo", "redu")
         .expect("unable to determine project directory");
@@ -120,12 +66,7 @@ fn main() -> anyhow::Result<()> {
         let filespec =
             { FileSpec::default().directory(directory).suppress_basename() };
 
-        let spec = match cli.verbose {
-            0 => LogSpecification::info(),
-            1 => LogSpecification::debug(),
-            _ => LogSpecification::trace(),
-        };
-        Logger::with(spec)
+        Logger::with(args.log_level)
             .log_to_file(filespec)
             .write_mode(WriteMode::BufferAndFlush)
             .format(flexi_logger::with_thread)
@@ -175,7 +116,7 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    sync_snapshots(&restic, &mut cache, cli.parallelism)?;
+    sync_snapshots(&restic, &mut cache, args.parallelism)?;
 
     let entries = cache.get_entries(None)?;
     if entries.is_empty() {

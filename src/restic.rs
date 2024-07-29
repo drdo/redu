@@ -96,17 +96,25 @@ pub struct Config {
 
 pub struct Restic {
     repo: Option<String>,
-    password_command: Option<String>,
+    password: Password,
     no_cache: bool,
+}
+
+#[derive(Debug)]
+pub enum Password {
+    /// A password command (restic: --password-command)
+    Command(String),
+    /// A password file (restic: --password-file)
+    File(String),
 }
 
 impl Restic {
     pub fn new(
         repo: Option<String>,
-        password_command: Option<String>,
+        password: Password,
         no_cache: bool,
     ) -> Self {
-        Restic { repo, password_command, no_cache }
+        Restic { repo, password, no_cache }
     }
 
     pub fn config(&self) -> Result<Config, Error> {
@@ -195,9 +203,11 @@ impl Restic {
         if let Some(repo) = &self.repo {
             cmd.arg("--repo").arg(repo);
         }
-        if let Some(password_command) = &self.password_command {
-            cmd.arg("--password-command").arg(password_command);
-        }
+        match &self.password {
+            Password::Command(command) =>
+                cmd.arg("--password-command").arg(command),
+            Password::File(file) => cmd.arg("--password-file").arg(file),
+        };
         if self.no_cache {
             cmd.arg("--no-cache");
         }
