@@ -95,9 +95,17 @@ pub struct Config {
 }
 
 pub struct Restic {
-    repo: Option<String>,
+    repository: Repository,
     password: Password,
     no_cache: bool,
+}
+
+#[derive(Debug)]
+pub enum Repository {
+    /// A repository string (restic: --repo)
+    Repo(String),
+    /// A repository file (restic: --repository-file)
+    File(String),
 }
 
 #[derive(Debug)]
@@ -110,11 +118,11 @@ pub enum Password {
 
 impl Restic {
     pub fn new(
-        repo: Option<String>,
+        repository: Repository,
         password: Password,
         no_cache: bool,
     ) -> Self {
-        Restic { repo, password, no_cache }
+        Restic { repository, password, no_cache }
     }
 
     pub fn config(&self) -> Result<Config, Error> {
@@ -200,9 +208,10 @@ impl Restic {
                 Ok(())
             });
         }
-        if let Some(repo) = &self.repo {
-            cmd.arg("--repo").arg(repo);
-        }
+        match &self.repository {
+            Repository::Repo(repo) => cmd.arg("--repo").arg(repo),
+            Repository::File(file) => cmd.arg("--repository-file").arg(file),
+        };
         match &self.password {
             Password::Command(command) =>
                 cmd.arg("--password-command").arg(command),

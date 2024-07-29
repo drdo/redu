@@ -1,11 +1,12 @@
 use clap::{ArgGroup, Parser};
 use log::LevelFilter;
+use redu::restic::Repository;
 
 use crate::restic::Password;
 
 #[derive(Debug)]
 pub struct Args {
-    pub repo: Option<String>,
+    pub repository: Repository,
     pub password: Password,
     pub parallelism: usize,
     pub log_level: LevelFilter,
@@ -18,7 +19,13 @@ impl Args {
         let cli = Cli::parse();
 
         Args {
-            repo: cli.repo,
+            repository: if let Some(repo) = cli.repo {
+                Repository::Repo(repo)
+            } else if let Some(file) = cli.repository_file {
+                Repository::File(file)
+            } else {
+                unreachable!("Error in Config: neither repo nor repository_file found. Please open an issue if you see this.")
+            },
             password: if let Some(command) = cli.password_command {
                 Password::Command(command)
             } else if let Some(file) = cli.password_file {
@@ -68,13 +75,21 @@ impl Args {
 #[derive(Parser)]
 #[command(version, long_about, verbatim_doc_comment)]
 #[command(group(
+    ArgGroup::new("repository")
+        .required(true)
+        .args(["repo", "repository_file"]),
+))]
+#[command(group(
     ArgGroup::new("password")
         .required(true)
         .args(["password_command", "password_file"]),
 ))]
 struct Cli {
-    #[arg(short = 'r', long)]
+    #[arg(short = 'r', long, env = "RESTIC_REPOSITORY")]
     repo: Option<String>,
+
+    #[arg(long, env = "RESTIC_REPOSITORY_FILE")]
+    repository_file: Option<String>,
 
     #[arg(long, value_name = "COMMAND", env = "RESTIC_PASSWORD_COMMAND")]
     password_command: Option<String>,
