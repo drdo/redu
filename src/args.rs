@@ -67,6 +67,8 @@ impl Args {
 /// Keybinds:
 /// Arrows or hjkl: Movement
 /// PgUp/PgDown or C-b/C-f: Page up / Page down
+/// Enter: Details
+/// Escape: Close dialog
 /// m: Mark
 /// u: Unmark
 /// c: Clear all marks
