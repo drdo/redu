@@ -473,7 +473,7 @@ fn convert_event(event: crossterm::event::Event) -> Option<Event> {
         ((KeyModifiers::empty(), KeyCode::Left), Left),
         ((KeyModifiers::empty(), KeyCode::Char('h')), Left),
         ((KeyModifiers::empty(), KeyCode::Right), Right),
-        ((KeyModifiers::empty(), KeyCode::Char(';')), Right),
+        ((KeyModifiers::empty(), KeyCode::Char('l')), Right),
         ((KeyModifiers::empty(), KeyCode::Up), Up),
         ((KeyModifiers::empty(), KeyCode::Char('k')), Up),
         ((KeyModifiers::empty(), KeyCode::Down), Down),
