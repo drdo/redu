@@ -45,7 +45,8 @@ Or via command line arguments:
 redu -r 'sftp://my-backup-server.my-domain.net' --password-command 'security find-generic-password -s restic -a personal -w' 
 ```
 
-Note: `--repository-file` (env: `RESTIC_REPOSITORY_FILE`) and `--password-file` (env: `RESTIC_PASSWORD_FILE`)
+Note: `--repository-file` (env: `RESTIC_REPOSITORY_FILE`) and `--password-file` (env: `RESTIC_PASSWORD_FILE`),
+as well as plain text passwords set via the `RESTIC_PASSWORD` environment variable,
 are supported as well and work just like in restic.
 
 # Usage
