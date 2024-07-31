@@ -30,6 +30,8 @@ impl Args {
                 Password::Command(command)
             } else if let Some(file) = cli.password_file {
                 Password::File(file)
+            } else if let Some(str) = cli.restic_password {
+                Password::Plain(str)
             } else {
                 unreachable!("Error in Config: neither password_command nor password_file found. Please open an issue if you see this.")
             },
@@ -84,7 +86,7 @@ impl Args {
 #[command(group(
     ArgGroup::new("password")
         .required(true)
-        .args(["password_command", "password_file"]),
+        .args(["password_command", "password_file", "restic_password"]),
 ))]
 struct Cli {
     #[arg(short = 'r', long, env = "RESTIC_REPOSITORY")]
@@ -98,6 +100,9 @@ struct Cli {
 
     #[arg(long, value_name = "FILE", env = "RESTIC_PASSWORD_FILE")]
     password_file: Option<String>,
+
+    #[arg(value_name = "RESTIC_PASSWORD", env = "RESTIC_PASSWORD")]
+    restic_password: Option<String>,
 
     ///  How many restic subprocesses to spawn concurrently.
     ///
