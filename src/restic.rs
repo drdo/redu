@@ -110,6 +110,8 @@ pub enum Repository {
 
 #[derive(Debug)]
 pub enum Password {
+    /// A plain string (restic: RESTIC_PASSWORD env variable)
+    Plain(String),
     /// A password command (restic: --password-command)
     Command(String),
     /// A password file (restic: --password-file)
@@ -216,6 +218,8 @@ impl Restic {
             Password::Command(command) =>
                 cmd.arg("--password-command").arg(command),
             Password::File(file) => cmd.arg("--password-file").arg(file),
+            // Nothing to do, the password is given as an env variable already.
+            Password::Plain(_str) => &cmd,
         };
         if self.no_cache {
             cmd.arg("--no-cache");
