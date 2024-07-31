@@ -96,7 +96,7 @@ pub struct Config {
 
 pub struct Restic {
     repository: Repository,
-    password: Password,
+    password: Option<Password>,
     no_cache: bool,
 }
 
@@ -119,7 +119,7 @@ pub enum Password {
 impl Restic {
     pub fn new(
         repository: Repository,
-        password: Password,
+        password: Option<Password>,
         no_cache: bool,
     ) -> Self {
         Restic { repository, password, no_cache }
@@ -213,9 +213,13 @@ impl Restic {
             Repository::File(file) => cmd.arg("--repository-file").arg(file),
         };
         match &self.password {
-            Password::Command(command) =>
-                cmd.arg("--password-command").arg(command),
-            Password::File(file) => cmd.arg("--password-file").arg(file),
+            Some(Password::Command(command)) => {
+                cmd.arg("--password-command").arg(command);
+            }
+            Some(Password::File(file)) => {
+                cmd.arg("--password-file").arg(file);
+            }
+            None => {}
         };
         if self.no_cache {
             cmd.arg("--no-cache");

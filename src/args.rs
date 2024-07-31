@@ -7,7 +7,7 @@ use crate::restic::Password;
 #[derive(Debug)]
 pub struct Args {
     pub repository: Repository,
-    pub password: Password,
+    pub password: Option<Password>,
     pub parallelism: usize,
     pub log_level: LevelFilter,
     pub no_cache: bool,
@@ -27,11 +27,11 @@ impl Args {
                 unreachable!("Error in Config: neither repo nor repository_file found. Please open an issue if you see this.")
             },
             password: if let Some(command) = cli.password_command {
-                Password::Command(command)
+                Some(Password::Command(command))
             } else if let Some(file) = cli.password_file {
-                Password::File(file)
+                Some(Password::File(file))
             } else {
-                unreachable!("Error in Config: neither password_command nor password_file found. Please open an issue if you see this.")
+                None
             },
             parallelism: cli.parallelism,
             log_level: match cli.verbose {
@@ -83,7 +83,6 @@ impl Args {
 ))]
 #[command(group(
     ArgGroup::new("password")
-        .required(true)
         .args(["password_command", "password_file"]),
 ))]
 struct Cli {
