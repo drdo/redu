@@ -31,7 +31,7 @@ Note: it currently requires nightly to build.
 # Running
  
 You can specify the repository and the password command in exactly the same ways
-that restic supports, with the exception that redu will not prompt you for the password.
+that restic supports.
 
 For example using environment variables:
 ```
@@ -48,6 +48,9 @@ redu -r 'sftp://my-backup-server.my-domain.net' --password-command 'security fin
 Note: `--repository-file` (env: `RESTIC_REPOSITORY_FILE`) and `--password-file` (env: `RESTIC_PASSWORD_FILE`),
 as well as plain text passwords set via the `RESTIC_PASSWORD` environment variable,
 are supported as well and work just like in restic.
+
+Similar to restic, redu will prompt you to enter the password, if it isn't
+given any other way.
 
 # Usage
 Redu keeps a cache with your file/directory sizes (per repo).

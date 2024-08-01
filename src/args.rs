@@ -1,6 +1,7 @@
 use clap::{ArgGroup, Parser};
 use log::LevelFilter;
 use redu::restic::Repository;
+use rpassword::read_password;
 
 use crate::restic::Password;
 
@@ -33,7 +34,7 @@ impl Args {
             } else if let Some(str) = cli.restic_password {
                 Password::Plain(str)
             } else {
-                unreachable!("Error in Config: neither password_command nor password_file found. Please open an issue if you see this.")
+                Password::Plain(Self::read_password_from_stdin())
             },
             parallelism: cli.parallelism,
             log_level: match cli.verbose {
@@ -43,6 +44,11 @@ impl Args {
             },
             no_cache: cli.no_cache,
         }
+    }
+
+    fn read_password_from_stdin() -> String {
+        eprint!("enter password for repository: ");
+        read_password().unwrap()
     }
 }
 
@@ -82,11 +88,6 @@ impl Args {
     ArgGroup::new("repository")
         .required(true)
         .args(["repo", "repository_file"]),
-))]
-#[command(group(
-    ArgGroup::new("password")
-        .required(true)
-        .args(["password_command", "password_file", "restic_password"]),
 ))]
 struct Cli {
     #[arg(short = 'r', long, env = "RESTIC_REPOSITORY")]

@@ -218,8 +218,9 @@ impl Restic {
             Password::Command(command) =>
                 cmd.arg("--password-command").arg(command),
             Password::File(file) => cmd.arg("--password-file").arg(file),
-            // Nothing to do, the password is given as an env variable already.
-            Password::Plain(_str) => &cmd,
+            // There's no way to hand over the password to restic directly, so we use the env
+            // variable instead.
+            Password::Plain(str) => cmd.env("RESTIC_PASSWORD", str),
         };
         if self.no_cache {
             cmd.arg("--no-cache");
