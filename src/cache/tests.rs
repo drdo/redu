@@ -1,10 +1,20 @@
-use std::{cmp::Reverse, convert::Infallible, fs, iter, path::PathBuf};
+use std::{cmp::Reverse, convert::Infallible, fs, iter, mem, path::PathBuf};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use rusqlite::Connection;
-use scopeguard::defer;
 use uuid::Uuid;
+
+use super::LATEST_VERSION;
+use crate::{
+    cache::{
+        determine_version,
+        filetree::{InsertError, SizeTree},
+        get_tables, timestamp_to_datetime, Cache, EntryDetails, Migrator,
+        VersionId,
+    },
+    restic::Snapshot,
+};
 
 pub fn mk_datetime(
     year: i32,
@@ -21,33 +31,20 @@ pub fn mk_datetime(
     .and_utc()
 }
 
-use super::{determine_version, get_tables, LATEST_VERSION};
-use crate::{
-    cache::{
-        filetree::{InsertError, SizeTree},
-        Cache, Migrator, VersionId,
-    },
-    restic::Snapshot,
-};
+pub struct Tempfile(pub PathBuf);
 
-pub fn tempfile() -> PathBuf {
-    let mut file = std::env::temp_dir();
-    file.push(Uuid::new_v4().to_string());
-    file
+impl Drop for Tempfile {
+    fn drop(&mut self) {
+        fs::remove_file(mem::take(&mut self.0)).unwrap();
+    }
 }
 
-pub fn with_cache_open_with_target(
-    target: VersionId,
-    body: impl FnOnce(Cache),
-) {
-    let file = tempfile();
-    defer! { fs::remove_file(&file).unwrap(); }
-    let migrator = Migrator::open_with_target(&file, target).unwrap();
-    body(migrator.migrate().unwrap());
-}
-
-pub fn with_cache_open(body: impl FnOnce(Cache)) {
-    with_cache_open_with_target(LATEST_VERSION, body);
+impl Tempfile {
+    pub fn new() -> Self {
+        let mut path = std::env::temp_dir();
+        path.push(Uuid::new_v4().to_string());
+        Tempfile(path)
+    }
 }
 
 pub fn path_parent(path: &Utf8Path) -> Option<Utf8PathBuf> {
@@ -112,6 +109,48 @@ fn to_sorted_entries(tree: &SizeTree) -> Vec<(Vec<&str>, usize, bool)> {
         .unwrap();
     sort_entries(&mut entries);
     entries
+}
+
+fn assert_get_entries_correct_at_path<P: AsRef<Utf8Path>>(
+    cache: &Cache,
+    tree: &SizeTree,
+    path: P,
+) {
+    let mut db_entries = {
+        let path_id = if path.as_ref().as_str().is_empty() {
+            None
+        } else {
+            cache.get_path_id_by_path(path.as_ref()).unwrap()
+        };
+        if path_id.is_none() && !path.as_ref().as_str().is_empty() {
+            // path was not found
+            vec![]
+        } else {
+            cache
+                .get_entries(path_id)
+                .unwrap()
+                .into_iter()
+                .map(|e| (e.component, e.size, e.is_dir))
+                .collect::<Vec<_>>()
+        }
+    };
+    db_entries.sort_by_key(|(component, _, _)| component.clone());
+    let mut entries = to_sorted_entries(&tree)
+        .iter()
+        .filter_map(|(components, size, is_dir)| {
+            // keep only the ones with parent == loc
+            let (last, parent_cs) = components.split_last()?;
+            let parent = parent_cs.iter().collect::<Utf8PathBuf>();
+            if parent == path.as_ref() {
+                Some((last.to_string(), *size, *is_dir))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by_key(|(_, size, _)| Reverse(*size));
+    entries.sort_by_key(|(component, _, _)| component.clone());
+    assert_eq!(db_entries, entries);
 }
 
 fn example_tree_0() -> SizeTree {
@@ -268,134 +307,159 @@ fn merge_commutativity() {
 
 #[test]
 fn cache_snapshots_entries() {
-    with_cache_open(|mut cache| {
-        fn test_snapshots(cache: &Cache, mut snapshots: Vec<&Snapshot>) {
-            let mut db_snapshots = cache.get_snapshots().unwrap();
-            db_snapshots.sort_unstable_by(|s0, s1| s0.id.cmp(&s1.id));
-            snapshots.sort_unstable_by(|s0, s1| s0.id.cmp(&s1.id));
-            for (s0, s1) in iter::zip(db_snapshots.iter(), snapshots.iter()) {
-                assert_eq!(s0.id, s1.id);
-                assert_eq!(s0.time, s1.time);
-                assert_eq!(s0.parent, s1.parent);
-                assert_eq!(s0.tree, s1.tree);
-                assert_eq!(s0.hostname, s1.hostname);
-                assert_eq!(s0.username, s1.username);
-                assert_eq!(s0.uid, s1.uid);
-                assert_eq!(s0.gid, s1.gid);
-                assert_eq!(s0.original_id, s1.original_id);
-                assert_eq!(s0.program_version, s1.program_version);
+    fn test_snapshots(cache: &Cache, mut snapshots: Vec<&Snapshot>) {
+        let mut db_snapshots = cache.get_snapshots().unwrap();
+        db_snapshots.sort_unstable_by(|s0, s1| s0.id.cmp(&s1.id));
+        snapshots.sort_unstable_by(|s0, s1| s0.id.cmp(&s1.id));
+        for (s0, s1) in iter::zip(db_snapshots.iter(), snapshots.iter()) {
+            assert_eq!(s0.id, s1.id);
+            assert_eq!(s0.time, s1.time);
+            assert_eq!(s0.parent, s1.parent);
+            assert_eq!(s0.tree, s1.tree);
+            assert_eq!(s0.hostname, s1.hostname);
+            assert_eq!(s0.username, s1.username);
+            assert_eq!(s0.uid, s1.uid);
+            assert_eq!(s0.gid, s1.gid);
+            assert_eq!(s0.original_id, s1.original_id);
+            assert_eq!(s0.program_version, s1.program_version);
 
-                let mut s0_paths: Vec<String> = s0.paths.to_vec();
-                s0_paths.sort();
-                let mut s1_paths: Vec<String> = s1.paths.to_vec();
-                s1_paths.sort();
-                assert_eq!(s0_paths, s1_paths);
+            let mut s0_paths: Vec<String> = s0.paths.to_vec();
+            s0_paths.sort();
+            let mut s1_paths: Vec<String> = s1.paths.to_vec();
+            s1_paths.sort();
+            assert_eq!(s0_paths, s1_paths);
 
-                let mut s0_excludes: Vec<String> = s0.excludes.to_vec();
-                s0_excludes.sort();
-                let mut s1_excludes: Vec<String> = s1.excludes.to_vec();
-                s1_excludes.sort();
-                assert_eq!(s0_excludes, s1_excludes);
+            let mut s0_excludes: Vec<String> = s0.excludes.to_vec();
+            s0_excludes.sort();
+            let mut s1_excludes: Vec<String> = s1.excludes.to_vec();
+            s1_excludes.sort();
+            assert_eq!(s0_excludes, s1_excludes);
 
-                let mut s0_tags: Vec<String> = s0.tags.to_vec();
-                s0_tags.sort();
-                let mut s1_tags: Vec<String> = s1.tags.to_vec();
-                s1_tags.sort();
-                assert_eq!(s0_tags, s1_tags);
-            }
+            let mut s0_tags: Vec<String> = s0.tags.to_vec();
+            s0_tags.sort();
+            let mut s1_tags: Vec<String> = s1.tags.to_vec();
+            s1_tags.sort();
+            assert_eq!(s0_tags, s1_tags);
         }
+    }
 
-        fn test_get_max_file_sizes<P: AsRef<Utf8Path>>(
-            cache: &Cache,
-            tree: &SizeTree,
-            path: P,
-        ) {
-            let mut db_entries = {
-                let path_id = if path.as_ref().as_str().is_empty() {
-                    None
-                } else {
-                    cache.get_path_id_by_path(path.as_ref()).unwrap()
-                };
-                if path_id.is_none() && !path.as_ref().as_str().is_empty() {
-                    // path was not found
-                    vec![]
-                } else {
-                    cache
-                        .get_entries(path_id)
-                        .unwrap()
-                        .into_iter()
-                        .map(|e| (e.component, e.size, e.is_dir))
-                        .collect::<Vec<_>>()
-                }
-            };
-            db_entries.sort_by_key(|(component, _, _)| component.clone());
-            let mut entries = to_sorted_entries(&tree)
-                .iter()
-                .filter_map(|(components, size, is_dir)| {
-                    // keep only the ones with parent == loc
-                    let (last, parent_cs) = components.split_last()?;
-                    let parent = parent_cs.iter().collect::<Utf8PathBuf>();
-                    if parent == path.as_ref() {
-                        Some((last.to_string(), *size, *is_dir))
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>();
-            entries.sort_by_key(|(_, size, _)| Reverse(*size));
-            entries.sort_by_key(|(component, _, _)| component.clone());
-            assert_eq!(db_entries, entries);
-        }
+    let tempfile = Tempfile::new();
+    let mut cache = Migrator::open(&tempfile.0).unwrap().migrate().unwrap();
 
-        let foo = Snapshot {
-            id: "foo".to_string(),
-            time: mk_datetime(2024, 4, 12, 12, 00, 00),
-            parent: Some("bar".to_string()),
-            tree: "sometree".to_string(),
-            paths: vec![
-                "/home/user".to_string(),
-                "/etc".to_string(),
-                "/var".to_string(),
-            ],
-            hostname: Some("foo.com".to_string()),
-            username: Some("user".to_string()),
-            uid: Some(123),
-            gid: Some(456),
-            excludes: vec![
-                ".cache".to_string(),
-                "Cache".to_string(),
-                "/home/user/Downloads".to_string(),
-            ],
-            tags: vec!["foo_machine".to_string(), "rewrite".to_string()],
-            original_id: Some("fefwfwew".to_string()),
-            program_version: Some("restic 0.16.0".to_string()),
-        };
+    let foo = Snapshot {
+        id: "foo".to_string(),
+        time: mk_datetime(2024, 4, 12, 12, 00, 00),
+        parent: Some("bar".to_string()),
+        tree: "sometree".to_string(),
+        paths: vec![
+            "/home/user".to_string(),
+            "/etc".to_string(),
+            "/var".to_string(),
+        ],
+        hostname: Some("foo.com".to_string()),
+        username: Some("user".to_string()),
+        uid: Some(123),
+        gid: Some(456),
+        excludes: vec![
+            ".cache".to_string(),
+            "Cache".to_string(),
+            "/home/user/Downloads".to_string(),
+        ],
+        tags: vec!["foo_machine".to_string(), "rewrite".to_string()],
+        original_id: Some("fefwfwew".to_string()),
+        program_version: Some("restic 0.16.0".to_string()),
+    };
 
-        let bar = Snapshot {
-            id: "bar".to_string(),
-            time: mk_datetime(2025, 5, 12, 17, 00, 00),
-            parent: Some("wat".to_string()),
-            tree: "anothertree".to_string(),
-            paths: vec!["/home/user".to_string()],
-            hostname: Some("foo.com".to_string()),
-            username: Some("user".to_string()),
-            uid: Some(123),
-            gid: Some(456),
-            excludes: vec![
-                ".cache".to_string(),
-                "Cache".to_string(),
-                "/home/user/Downloads".to_string(),
-            ],
-            tags: vec!["foo_machine".to_string(), "rewrite".to_string()],
-            original_id: Some("fefwfwew".to_string()),
-            program_version: Some("restic 0.16.0".to_string()),
-        };
+    let bar = Snapshot {
+        id: "bar".to_string(),
+        time: mk_datetime(2025, 5, 12, 17, 00, 00),
+        parent: Some("wat".to_string()),
+        tree: "anothertree".to_string(),
+        paths: vec!["/home/user".to_string()],
+        hostname: Some("foo.com".to_string()),
+        username: Some("user".to_string()),
+        uid: Some(123),
+        gid: Some(456),
+        excludes: vec![
+            ".cache".to_string(),
+            "Cache".to_string(),
+            "/home/user/Downloads".to_string(),
+        ],
+        tags: vec!["foo_machine".to_string(), "rewrite".to_string()],
+        original_id: Some("fefwfwew".to_string()),
+        program_version: Some("restic 0.16.0".to_string()),
+    };
 
-        let wat = Snapshot {
-            id: "wat".to_string(),
-            time: mk_datetime(2023, 5, 12, 17, 00, 00),
+    let wat = Snapshot {
+        id: "wat".to_string(),
+        time: mk_datetime(2023, 5, 12, 17, 00, 00),
+        parent: None,
+        tree: "fwefwfwwefwefwe".to_string(),
+        paths: vec![],
+        hostname: None,
+        username: None,
+        uid: None,
+        gid: None,
+        excludes: vec![],
+        tags: vec![],
+        original_id: None,
+        program_version: None,
+    };
+
+    cache.save_snapshot(&foo, example_tree_0()).unwrap();
+    cache.save_snapshot(&bar, example_tree_1()).unwrap();
+    cache.save_snapshot(&wat, example_tree_2()).unwrap();
+
+    test_snapshots(&cache, vec![&foo, &bar, &wat]);
+
+    fn test_entries(cache: &Cache, sizetree: SizeTree) {
+        assert_get_entries_correct_at_path(cache, &sizetree, "");
+        assert_get_entries_correct_at_path(cache, &sizetree, "a");
+        assert_get_entries_correct_at_path(cache, &sizetree, "b");
+        assert_get_entries_correct_at_path(cache, &sizetree, "a/0");
+        assert_get_entries_correct_at_path(cache, &sizetree, "a/1");
+        assert_get_entries_correct_at_path(cache, &sizetree, "a/2");
+        assert_get_entries_correct_at_path(cache, &sizetree, "b/0");
+        assert_get_entries_correct_at_path(cache, &sizetree, "b/1");
+        assert_get_entries_correct_at_path(cache, &sizetree, "b/2");
+        assert_get_entries_correct_at_path(cache, &sizetree, "something");
+        assert_get_entries_correct_at_path(cache, &sizetree, "a/something");
+    }
+
+    test_entries(
+        &cache,
+        example_tree_0().merge(example_tree_1()).merge(example_tree_2()),
+    );
+
+    // Deleting a non-existent snapshot does nothing
+    cache.delete_snapshot("non-existent").unwrap();
+    test_snapshots(&cache, vec![&foo, &bar, &wat]);
+    test_entries(
+        &cache,
+        example_tree_0().merge(example_tree_1()).merge(example_tree_2()),
+    );
+
+    // Remove bar
+    cache.delete_snapshot("bar").unwrap();
+    test_snapshots(&cache, vec![&foo, &wat]);
+    test_entries(&cache, example_tree_0().merge(example_tree_2()));
+}
+
+// TODO: Ideally we would run more than 10_000 but at the moment this is too slow.
+#[test]
+fn lots_of_snapshots() {
+    let tempfile = Tempfile::new();
+    let mut cache = Migrator::open(&tempfile.0).unwrap().migrate().unwrap();
+
+    const NUM_SNAPSHOTS: usize = 10_000;
+
+    // Insert lots of snapshots
+    for i in 0..NUM_SNAPSHOTS {
+        let snapshot = Snapshot {
+            id: i.to_string(),
+            time: timestamp_to_datetime(i as i64).unwrap(),
             parent: None,
-            tree: "fwefwfwwefwefwe".to_string(),
+            tree: i.to_string(),
             paths: vec![],
             hostname: None,
             username: None,
@@ -406,44 +470,25 @@ fn cache_snapshots_entries() {
             original_id: None,
             program_version: None,
         };
+        cache.save_snapshot(&snapshot, example_tree_0()).unwrap();
+    }
 
-        cache.save_snapshot(&foo, example_tree_0()).unwrap();
-        cache.save_snapshot(&bar, example_tree_1()).unwrap();
-        cache.save_snapshot(&wat, example_tree_2()).unwrap();
+    // get_entries
+    let tree = example_tree_0();
+    for path in ["", "a", "a/0", "a/1", "a/1/x", "a/something"] {
+        assert_get_entries_correct_at_path(&cache, &tree, path);
+    }
 
-        test_snapshots(&cache, vec![&foo, &bar, &wat]);
-
-        fn test_entries(cache: &Cache, sizetree: SizeTree) {
-            test_get_max_file_sizes(cache, &sizetree, "");
-            test_get_max_file_sizes(cache, &sizetree, "a");
-            test_get_max_file_sizes(cache, &sizetree, "b");
-            test_get_max_file_sizes(cache, &sizetree, "a/0");
-            test_get_max_file_sizes(cache, &sizetree, "a/1");
-            test_get_max_file_sizes(cache, &sizetree, "a/2");
-            test_get_max_file_sizes(cache, &sizetree, "b/0");
-            test_get_max_file_sizes(cache, &sizetree, "b/1");
-            test_get_max_file_sizes(cache, &sizetree, "b/2");
-            test_get_max_file_sizes(cache, &sizetree, "something");
-            test_get_max_file_sizes(cache, &sizetree, "a/something");
-        }
-
-        test_entries(
-            &cache,
-            example_tree_0().merge(example_tree_1()).merge(example_tree_2()),
-        );
-
-        // Deleting a non-existent snapshot does nothing
-        cache.delete_snapshot("non-existent").unwrap();
-        test_snapshots(&cache, vec![&foo, &bar, &wat]);
-        test_entries(
-            &cache,
-            example_tree_0().merge(example_tree_1()).merge(example_tree_2()),
-        );
-
-        // Remove bar
-        cache.delete_snapshot("bar").unwrap();
-        test_snapshots(&cache, vec![&foo, &wat]);
-        test_entries(&cache, example_tree_0().merge(example_tree_2()));
+    // get_entry_details
+    let path_id = cache.get_path_id_by_path("a/0".into()).unwrap().unwrap();
+    let details = cache.get_entry_details(path_id).unwrap().unwrap();
+    assert_eq!(details, EntryDetails {
+        max_size: 4,
+        max_size_snapshot_hash: (NUM_SNAPSHOTS - 1).to_string(),
+        first_seen: timestamp_to_datetime(0).unwrap(),
+        first_seen_snapshot_hash: 0.to_string(),
+        last_seen: timestamp_to_datetime((NUM_SNAPSHOTS - 1) as i64).unwrap(),
+        last_seen_snapshot_hash: (NUM_SNAPSHOTS - 1).to_string(),
     });
 }
 
@@ -469,9 +514,9 @@ fn assert_marks(cache: &Cache, marks: &[&str]) {
 
 fn populate_v0<'a>(
     marks: impl IntoIterator<Item = &'a str>,
-) -> Result<PathBuf, anyhow::Error> {
-    let file = tempfile();
-    let mut cache = Migrator::open_with_target(&file, 0)?.migrate()?;
+) -> Result<Tempfile, anyhow::Error> {
+    let file = Tempfile::new();
+    let mut cache = Migrator::open_with_target(&file.0, 0)?.migrate()?;
     let tx = cache.conn.transaction()?;
     {
         let mut marks_stmt =
@@ -490,7 +535,7 @@ fn test_migrate_v0_to_v1() {
     let file = populate_v0(marks).unwrap();
 
     let cache =
-        Migrator::open_with_target(&file, 1).unwrap().migrate().unwrap();
+        Migrator::open_with_target(&file.0, 1).unwrap().migrate().unwrap();
 
     assert_tables(&cache.conn, &[
         "metadata_integer",
