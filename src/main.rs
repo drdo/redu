@@ -191,7 +191,8 @@ fn main() -> anyhow::Result<()> {
                     Some(Event::Entries { path_id, entries })
                 }
                 Action::GetEntryDetails(path_id) =>
-                    Some(Event::EntryDetails(cache.get_entry_details(path_id)?)),
+                    Some(Event::EntryDetails(cache.get_entry_details(path_id)?
+                        .expect("The UI requested a GetEntryDetails with a path_id that does not exist"))),
                 Action::UpsertMark(path) => {
                     cache.upsert_mark(&path)?;
                     Some(Event::Marks(cache.get_marks()?))
