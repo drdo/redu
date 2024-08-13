@@ -183,11 +183,13 @@ impl Cache {
         path_id: PathId,
     ) -> Result<Option<EntryDetails>, Error> {
         let raw_path_id = path_id.0;
-        let run_query =
-            |table: &str| -> Result<(String, usize, DateTime<Utc>), Error> {
-                let snapshot_hash = table.strip_prefix("entries_").unwrap();
-                let stmt_str = format!(
-                    "SELECT \
+        let run_query = |table: &str| -> Result<
+            Option<(String, usize, DateTime<Utc>)>,
+            Error,
+        > {
+            let snapshot_hash = table.strip_prefix("entries_").unwrap();
+            let stmt_str = format!(
+                "SELECT \
                      hash, \
                      size, \
                      time \
@@ -195,47 +197,54 @@ impl Cache {
                      JOIN paths ON path_id = paths.id \
                      JOIN snapshots ON hash = '{snapshot_hash}' \
                  WHERE path_id = {raw_path_id}\n"
-                );
-                let mut stmt = self.conn.prepare(&stmt_str)?;
-                let (hash, size, timestamp) = stmt.query_row([], |row| {
-                    Ok((row.get("hash")?, row.get("size")?, row.get("time")?))
-                })?;
-                let time = timestamp_to_datetime(timestamp)?;
-                Ok((hash, size, time))
-            };
+            );
+            let mut stmt = self.conn.prepare(&stmt_str)?;
+            stmt.query_row([], |row| {
+                Ok((row.get("hash")?, row.get("size")?, row.get("time")?))
+            })
+            .optional()?
+            .map(|(hash, size, timestamp)| {
+                Ok((hash, size, timestamp_to_datetime(timestamp)?))
+            })
+            .transpose()
+        };
 
         let mut entries_tables = self.entries_tables()?;
-        let mut details = match entries_tables.next() {
-            None => return Ok(None),
-            Some(table) => {
-                let (hash, size, time) = run_query(&table)?;
-                EntryDetails {
-                    max_size: size,
-                    max_size_snapshot_hash: hash.clone(),
-                    first_seen: time,
-                    first_seen_snapshot_hash: hash.clone(),
-                    last_seen: time,
-                    last_seen_snapshot_hash: hash,
+        let mut details = loop {
+            match entries_tables.next() {
+                None => return Ok(None),
+                Some(table) => {
+                    if let Some((hash, size, time)) = run_query(&table)? {
+                        break EntryDetails {
+                            max_size: size,
+                            max_size_snapshot_hash: hash.clone(),
+                            first_seen: time,
+                            first_seen_snapshot_hash: hash.clone(),
+                            last_seen: time,
+                            last_seen_snapshot_hash: hash,
+                        };
+                    }
                 }
             }
         };
         let mut max_size_time = details.first_seen; // Time of the max_size snapshot
         for table in entries_tables {
-            let (hash, size, time) = run_query(&table)?;
-            if size > details.max_size
-                || (size == details.max_size && time > max_size_time)
-            {
-                details.max_size = size;
-                details.max_size_snapshot_hash = hash.clone();
-                max_size_time = time;
-            }
-            if time < details.first_seen {
-                details.first_seen = time;
-                details.first_seen_snapshot_hash = hash.clone();
-            }
-            if time > details.last_seen {
-                details.last_seen = time;
-                details.last_seen_snapshot_hash = hash;
+            if let Some((hash, size, time)) = run_query(&table)? {
+                if size > details.max_size
+                    || (size == details.max_size && time > max_size_time)
+                {
+                    details.max_size = size;
+                    details.max_size_snapshot_hash = hash.clone();
+                    max_size_time = time;
+                }
+                if time < details.first_seen {
+                    details.first_seen = time;
+                    details.first_seen_snapshot_hash = hash.clone();
+                }
+                if time > details.last_seen {
+                    details.last_seen = time;
+                    details.last_seen_snapshot_hash = hash;
+                }
             }
         }
         Ok(Some(details))
