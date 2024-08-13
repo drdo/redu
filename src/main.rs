@@ -1,9 +1,6 @@
-#![feature(panic_update_hook)]
-
 use std::{
     fs,
     io::stderr,
-    panic,
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc::{self, RecvTimeoutError},
@@ -126,15 +123,13 @@ fn main() -> anyhow::Result<()> {
 
     // UI
     stderr().execute(EnterAlternateScreen)?;
-    panic::update_hook(|prev, info| {
+    defer! {
         stderr().execute(LeaveAlternateScreen).unwrap();
-        prev(info);
-    });
+    }
     enable_raw_mode()?;
-    panic::update_hook(|prev, info| {
+    defer! {
         disable_raw_mode().unwrap();
-        prev(info);
-    });
+    }
     let mut terminal = Terminal::new(CrosstermBackend::new(stderr()))?;
     terminal.clear()?;
 
@@ -208,9 +203,6 @@ fn main() -> anyhow::Result<()> {
             }
         }
     }
-
-    disable_raw_mode()?;
-    stderr().execute(LeaveAlternateScreen)?;
 
     for line in output_paths {
         println!("{}", escape_for_exclude(line.as_str()));
