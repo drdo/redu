@@ -136,7 +136,7 @@ fn main() -> anyhow::Result<()> {
     let mut app = {
         let rect = terminal.size()?;
         App::new(
-            rect.as_size(),
+            rect,
             None,
             Utf8PathBuf::new(),
             entries,
@@ -502,7 +502,7 @@ fn render<'a>(
     app: &App,
 ) -> std::io::Result<CompletedFrame<'a>> {
     terminal.draw(|frame| {
-        let area = frame.size();
+        let area = frame.area();
         let buf = frame.buffer_mut();
         app.render_ref(area, buf)
     })

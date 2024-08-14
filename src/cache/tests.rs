@@ -5,13 +5,11 @@ use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use rusqlite::Connection;
 use uuid::Uuid;
 
-use super::LATEST_VERSION;
 use crate::{
     cache::{
         determine_version,
         filetree::{InsertError, SizeTree},
         get_tables, timestamp_to_datetime, Cache, EntryDetails, Migrator,
-        VersionId,
     },
     restic::Snapshot,
 };
