@@ -1,6 +1,6 @@
 [package]
 name = "redu"
-version = "0.2.6"
+version = "0.2.7"
 authors = ["Daniel Rebelo de Oliveira <drdo@drdo.eu>"]
 license = "MIT"
 homepage = "https://github.com/drdo/redu"
@@ -15,14 +15,14 @@ anyhow = "1"
 camino = "1"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive", "env"] }
-crossterm = "0.27"
+crossterm = "0.28"
 directories = "5"
 flexi_logger = "0.28"
 humansize = "2"
 indicatif = "0.17"
 log = "0.4"
 rand = "0.8"
-ratatui = { version = "0.27", features = [
+ratatui = { version = "0.28", features = [
         "unstable-rendered-line-info",
         "unstable-widget-ref",
 ] }
