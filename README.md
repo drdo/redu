@@ -24,12 +24,12 @@ Note: On MacOS if you download via browser you might need to remove quarantine w
 
 or you can install with cargo:
 ```
-cargo install redu
+cargo +nightly install redu --locked
 ```
 Note: it currently requires nightly to build.
- 
+
 # Running
- 
+
 You can specify the repository and the password command in exactly the same ways
 that restic supports.
 
@@ -37,12 +37,12 @@ For example using environment variables:
 ```
 $ export RESTIC_REPOSITORY='sftp://my-backup-server.my-domain.net'
 $ export RESTIC_PASSWORD_COMMAND='security find-generic-password -s restic -a personal -w'
-$ redu 
+$ redu
 ```
 
 Or via command line arguments:
 ```
-redu -r 'sftp://my-backup-server.my-domain.net' --password-command 'security find-generic-password -s restic -a personal -w' 
+redu -r 'sftp://my-backup-server.my-domain.net' --password-command 'security find-generic-password -s restic -a personal -w'
 ```
 
 Note: `--repository-file` (env: `RESTIC_REPOSITORY_FILE`) and `--password-file` (env: `RESTIC_PASSWORD_FILE`),
@@ -90,13 +90,13 @@ browse around.
 
 Hint: you can press **Escape** to close the details window (as well as other dialogs).
 
-### Marking files 
+### Marking files
 You can mark files and directories to build up your list of things to exclude.
 Keybinds
 - **m**: mark selected file/directory
 - **u**: unmark selected file/directory
 - **c**: clear all marks (this will prompt you for confirmation)
- 
+
 The marks are persistent across runs of redu (they are saved in the cache file),
 so feel free to mark a few files and just quit and come back later.
 
