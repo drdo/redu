@@ -115,98 +115,11 @@ fn main() -> anyhow::Result<()> {
 
     sync_snapshots(&restic, &mut cache, args.parallelism)?;
 
-    let entries = cache.get_entries(None)?;
-    if entries.is_empty() {
-        eprintln!("The repository has no snapshots!");
-        return Ok(());
-    }
-
-    // UI
-    stderr().execute(EnterAlternateScreen)?;
-    defer! {
-        stderr().execute(LeaveAlternateScreen).unwrap();
-    }
-    enable_raw_mode()?;
-    defer! {
-        disable_raw_mode().unwrap();
-    }
-    let mut terminal = Terminal::new(CrosstermBackend::new(stderr()))?;
-    terminal.clear()?;
-
-    let mut app = {
-        let rect = terminal.size()?;
-        App::new(
-            rect,
-            None,
-            Utf8PathBuf::new(),
-            entries,
-            cache.get_marks().unwrap(),
-            vec![
-                "Enter".bold(),
-                ":Details  ".into(),
-                "m".bold(),
-                ":Mark  ".into(),
-                "u".bold(),
-                ":Unmark  ".into(),
-                "c".bold(),
-                ":ClearAllMarks  ".into(),
-                "g".bold(),
-                ":Generate  ".into(),
-                "q".bold(),
-                ":Quit".into(),
-            ],
-        )
-    };
-
-    let mut output_paths = vec![];
-
-    render(&mut terminal, &app)?;
-    'outer: loop {
-        let mut o_event = convert_event(crossterm::event::read()?);
-        while let Some(event) = o_event {
-            o_event = match app.update(event) {
-                Action::Nothing => None,
-                Action::Render => {
-                    render(&mut terminal, &app)?;
-                    None
-                }
-                Action::Quit => break 'outer,
-                Action::Generate(paths) => {
-                    output_paths = paths;
-                    break 'outer;
-                }
-                Action::GetParentEntries(path_id) => {
-                    let parent_id = cache.get_parent_id(path_id)?
-                        .expect("The UI requested a GetParentEntries with a path_id that does not exist");
-                    let entries = cache.get_entries(parent_id)?;
-                    Some(Event::Entries { path_id: parent_id, entries })
-                }
-                Action::GetEntries(path_id) => {
-                    let entries = cache.get_entries(path_id)?;
-                    Some(Event::Entries { path_id, entries })
-                }
-                Action::GetEntryDetails(path_id) =>
-                    Some(Event::EntryDetails(cache.get_entry_details(path_id)?
-                        .expect("The UI requested a GetEntryDetails with a path_id that does not exist"))),
-                Action::UpsertMark(path) => {
-                    cache.upsert_mark(&path)?;
-                    Some(Event::Marks(cache.get_marks()?))
-                }
-                Action::DeleteMark(loc) => {
-                    cache.delete_mark(&loc).unwrap();
-                    Some(Event::Marks(cache.get_marks()?))
-                }
-                Action::DeleteAllMarks => {
-                    cache.delete_all_marks()?;
-                    Some(Event::Marks(Vec::new()))
-                }
-            }
-        }
-    }
-
-    for line in output_paths {
+    let paths = ui(cache)?;
+    for line in paths {
         println!("{}", escape_for_exclude(line.as_str()));
     }
+
     Ok(())
 }
 
@@ -494,6 +407,91 @@ fn convert_event(event: crossterm::event::Event) -> Option<Event> {
                 }
             }),
         _ => None,
+    }
+}
+
+fn ui(mut cache: Cache) -> anyhow::Result<Vec<Utf8PathBuf>> {
+    let entries = cache.get_entries(None)?;
+    if entries.is_empty() {
+        eprintln!("The repository is empty!");
+        return Ok(vec![]);
+    }
+
+    stderr().execute(EnterAlternateScreen)?;
+    defer! {
+        stderr().execute(LeaveAlternateScreen).unwrap();
+    }
+    enable_raw_mode()?;
+    defer! {
+        disable_raw_mode().unwrap();
+    }
+    let mut terminal = Terminal::new(CrosstermBackend::new(stderr()))?;
+    terminal.clear()?;
+
+    let mut app = {
+        let rect = terminal.size()?;
+        App::new(
+            rect,
+            None,
+            Utf8PathBuf::new(),
+            entries,
+            cache.get_marks()?,
+            vec![
+                "Enter".bold(),
+                ":Details  ".into(),
+                "m".bold(),
+                ":Mark  ".into(),
+                "u".bold(),
+                ":Unmark  ".into(),
+                "c".bold(),
+                ":ClearAllMarks  ".into(),
+                "g".bold(),
+                ":Generate  ".into(),
+                "q".bold(),
+                ":Quit".into(),
+            ],
+        )
+    };
+
+    render(&mut terminal, &app)?;
+    loop {
+        let mut o_event = convert_event(crossterm::event::read()?);
+        while let Some(event) = o_event {
+            o_event = match app.update(event) {
+                Action::Nothing => None,
+                Action::Render => {
+                    render(&mut terminal, &app)?;
+                    None
+                }
+                Action::Quit => return Ok(vec![]),
+                Action::Generate(paths) => return Ok(paths),
+                Action::GetParentEntries(path_id) => {
+                    let parent_id = cache.get_parent_id(path_id)?
+                        .expect("The UI requested a GetParentEntries with a path_id that does not exist");
+                    let entries = cache.get_entries(parent_id)?;
+                    Some(Event::Entries { path_id: parent_id, entries })
+                }
+                Action::GetEntries(path_id) => {
+                    let entries = cache.get_entries(path_id)?;
+                    Some(Event::Entries { path_id, entries })
+                }
+                Action::GetEntryDetails(path_id) =>
+                    Some(Event::EntryDetails(cache.get_entry_details(path_id)?
+                        .expect("The UI requested a GetEntryDetails with a path_id that does not exist"))),
+                Action::UpsertMark(path) => {
+                    cache.upsert_mark(&path)?;
+                    Some(Event::Marks(cache.get_marks()?))
+                }
+                Action::DeleteMark(loc) => {
+                    cache.delete_mark(&loc).unwrap();
+                    Some(Event::Marks(cache.get_marks()?))
+                }
+                Action::DeleteAllMarks => {
+                    cache.delete_all_marks()?;
+                    Some(Event::Marks(Vec::new()))
+                }
+            }
+        }
     }
 }
 
