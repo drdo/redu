@@ -13,6 +13,7 @@ use std::{
 use anyhow::Context;
 use args::Args;
 use camino::{Utf8Path, Utf8PathBuf};
+use chrono::Local;
 use crossterm::{
     event::{KeyCode, KeyModifiers},
     terminal::{
@@ -22,9 +23,8 @@ use crossterm::{
     ExecutableCommand,
 };
 use directories::ProjectDirs;
-use flexi_logger::{FileSpec, Logger, WriteMode};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use log::{error, info, trace};
+use log::{error, info, trace, LevelFilter};
 use rand::{seq::SliceRandom, thread_rng};
 use ratatui::{
     backend::{Backend, CrosstermBackend},
@@ -38,6 +38,7 @@ use redu::{
     restic::{self, escape_for_exclude, Restic, Snapshot},
 };
 use scopeguard::defer;
+use simplelog::WriteLogger;
 use thiserror::Error;
 use util::snapshot_short_id;
 
@@ -54,21 +55,38 @@ fn main() -> anyhow::Result<()> {
     let dirs = ProjectDirs::from("eu", "drdo", "redu")
         .expect("unable to determine project directory");
 
-    let _logger = {
-        let mut directory = dirs.data_local_dir().to_path_buf();
-        directory.push(Utf8Path::new("logs"));
+    // Initialize the logger
+    {
+        fn generate_filename() -> String {
+            format!("{}.log", Local::now().format("%Y-%m-%dT%H:%M:%S%.f%:z"))
+        }
 
-        eprintln!("Logging to {:#?}", directory);
+        let mut path = dirs.data_local_dir().to_path_buf();
+        path.push(Utf8Path::new("logs"));
+        fs::create_dir_all(&path)?;
+        path.push(generate_filename());
+        let file = loop {
+            // Spin until we hit a timestamp that isn't taken yet.
+            // With the level of precision that we are using this should virtually
+            // never run more than once.
+            match fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+            {
+                Err(err) if err.kind() == io::ErrorKind::AlreadyExists =>
+                    path.set_file_name(generate_filename()),
+                x => break x,
+            }
+        }?;
 
-        let filespec =
-            { FileSpec::default().directory(directory).suppress_basename() };
+        eprintln!("Logging to {:#?}", path);
 
-        Logger::with(args.log_level)
-            .log_to_file(filespec)
-            .write_mode(WriteMode::BufferAndFlush)
-            .format(flexi_logger::with_thread)
-            .start()?
-    };
+        let config = simplelog::ConfigBuilder::new()
+            .set_target_level(LevelFilter::Error)
+            .build();
+        WriteLogger::init(args.log_level, config, file)?;
+    }
 
     unsafe {
         rusqlite::trace::config_log(Some(|code, msg| {
