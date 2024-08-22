@@ -1,6 +1,6 @@
 use std::{
     fs,
-    io::stderr,
+    io::{self, stderr},
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc::{self, RecvTimeoutError},
@@ -498,7 +498,7 @@ fn ui(mut cache: Cache) -> anyhow::Result<Vec<Utf8PathBuf>> {
 fn render<'a>(
     terminal: &'a mut Terminal<impl Backend>,
     app: &App,
-) -> std::io::Result<CompletedFrame<'a>> {
+) -> io::Result<CompletedFrame<'a>> {
     terminal.draw(|frame| {
         let area = frame.area();
         let buf = frame.buffer_mut();

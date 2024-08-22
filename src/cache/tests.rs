@@ -39,7 +39,7 @@ impl Drop for Tempfile {
 
 impl Tempfile {
     pub fn new() -> Self {
-        let mut path = std::env::temp_dir();
+        let mut path = env::temp_dir();
         path.push(Uuid::new_v4().to_string());
         Tempfile(path)
     }
