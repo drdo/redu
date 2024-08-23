@@ -24,7 +24,7 @@ use crossterm::{
 };
 use directories::ProjectDirs;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use log::{error, info, trace, LevelFilter};
+use log::{debug, error, info, trace, LevelFilter};
 use rand::{seq::SliceRandom, thread_rng};
 use ratatui::{
     backend::{Backend, CrosstermBackend},
@@ -38,7 +38,7 @@ use redu::{
     restic::{self, escape_for_exclude, Restic, Snapshot},
 };
 use scopeguard::defer;
-use simplelog::WriteLogger;
+use simplelog::{ThreadLogMode, WriteLogger};
 use thiserror::Error;
 use util::snapshot_short_id;
 
@@ -84,6 +84,7 @@ fn main() -> anyhow::Result<()> {
 
         let config = simplelog::ConfigBuilder::new()
             .set_target_level(LevelFilter::Error)
+            .set_thread_mode(ThreadLogMode::Names)
             .build();
         WriteLogger::init(args.log_level, config, file)?;
     }
@@ -310,17 +311,15 @@ fn fetching_thread_body(
             "snapshot fetched in {}s ({short_id})",
             start.elapsed().as_secs_f64()
         );
-        trace!("got snapshot, sending ({short_id})");
         if should_quit.load(Ordering::SeqCst) {
             return Ok(());
         }
         let start = Instant::now();
         snapshot_sender.send((snapshot.clone(), sizetree)).unwrap();
-        info!(
+        debug!(
             "waited {}s to send snapshot ({short_id})",
             start.elapsed().as_secs_f64()
         );
-        trace!("snapshot sent ({short_id})");
     }
     Ok(())
 }
@@ -350,7 +349,7 @@ fn db_thread_body(
         // We wait with timeout to poll the should_quit periodically
         match snapshot_receiver.recv_timeout(should_quit_poll_period) {
             Ok((snapshot, sizetree)) => {
-                info!(
+                debug!(
                     "waited {}s to get snapshot",
                     start.elapsed().as_secs_f64()
                 );
