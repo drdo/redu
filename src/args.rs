@@ -15,7 +15,7 @@ pub struct Args {
 }
 
 impl Args {
-    /// Parse arguments from std::env::args_os(), exit on error.
+    /// Parse arguments from env::args_os(), exit on error.
     pub fn parse() -> Self {
         let cli = Cli::parse();
 

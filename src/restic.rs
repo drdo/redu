@@ -1,12 +1,14 @@
+use core::str;
 #[cfg(not(target_os = "windows"))]
 use std::os::unix::process::CommandExt;
 use std::{
     borrow::Cow,
     ffi::OsStr,
-    fmt::{Display, Formatter},
-    io::{BufRead, BufReader, Lines, Read},
+    fmt::{self, Display, Formatter},
+    io::{self, BufRead, BufReader, Lines, Read},
     iter::Step,
     marker::PhantomData,
+    mem,
     process::{Child, ChildStdout, Command, ExitStatusError, Stdio},
     str::Utf8Error,
 };
@@ -21,12 +23,12 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 #[error("error launching restic process")]
-pub struct LaunchError(#[source] pub std::io::Error);
+pub struct LaunchError(#[source] pub io::Error);
 
 #[derive(Debug, Error)]
 pub enum RunError {
     #[error("error doing IO")]
-    Io(#[from] std::io::Error),
+    Io(#[from] io::Error),
     #[error("error reading input as UTF-8")]
     Utf8(#[from] Utf8Error),
     #[error("error parsing JSON")]
@@ -43,8 +45,8 @@ pub enum ErrorKind {
     Run(#[from] RunError),
 }
 
-impl From<std::io::Error> for ErrorKind {
-    fn from(value: std::io::Error) -> Self {
+impl From<io::Error> for ErrorKind {
+    fn from(value: io::Error) -> Self {
         ErrorKind::Run(RunError::Io(value))
     }
 }
@@ -75,7 +77,7 @@ pub struct Error {
 }
 
 impl Display for Error {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match &self.stderr {
             Some(s) => write!(f, "restic error, stderr dump:\n{}", s),
             None => write!(f, "restic error"),
@@ -141,7 +143,7 @@ impl Restic {
     ) -> Result<impl Iterator<Item = Result<File, Error>> + 'static, LaunchError>
     {
         fn parse_file(mut v: Value) -> Option<File> {
-            let mut m = std::mem::take(v.as_object_mut()?);
+            let mut m = mem::take(v.as_object_mut()?);
             Some(File {
                 path: Utf8PathBuf::from(m.remove("path")?.as_str()?),
                 size: m.remove("size")?.as_u64()? as usize,
@@ -184,7 +186,7 @@ impl Restic {
         })?;
         let r_value = try {
             output.status.exit_ok()?;
-            serde_json::from_str(std::str::from_utf8(&output.stdout)?)?
+            serde_json::from_str(str::from_utf8(&output.stdout)?)?
         };
         match r_value {
             Err(kind) => Err(Error {

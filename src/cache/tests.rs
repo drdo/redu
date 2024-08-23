@@ -1,4 +1,6 @@
-use std::{cmp::Reverse, convert::Infallible, fs, iter, mem, path::PathBuf};
+use std::{
+    cmp::Reverse, convert::Infallible, env, fs, iter, mem, path::PathBuf,
+};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
@@ -39,7 +41,7 @@ impl Drop for Tempfile {
 
 impl Tempfile {
     pub fn new() -> Self {
-        let mut path = std::env::temp_dir();
+        let mut path = env::temp_dir();
         path.push(Uuid::new_v4().to_string());
         Tempfile(path)
     }
