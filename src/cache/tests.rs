@@ -1,5 +1,6 @@
 use std::{
-    cmp::Reverse, convert::Infallible, env, fs, iter, mem, path::PathBuf,
+    cmp::Reverse, collections::HashSet, convert::Infallible, env, fs, iter,
+    mem, path::PathBuf,
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -323,21 +324,23 @@ fn cache_snapshots_entries() {
             assert_eq!(s0.original_id, s1.original_id);
             assert_eq!(s0.program_version, s1.program_version);
 
-            let mut s0_paths: Vec<String> = s0.paths.to_vec();
+            let mut s0_paths: Vec<String> = s0.paths.iter().cloned().collect();
             s0_paths.sort();
-            let mut s1_paths: Vec<String> = s1.paths.to_vec();
+            let mut s1_paths: Vec<String> = s1.paths.iter().cloned().collect();
             s1_paths.sort();
             assert_eq!(s0_paths, s1_paths);
 
-            let mut s0_excludes: Vec<String> = s0.excludes.to_vec();
+            let mut s0_excludes: Vec<String> =
+                s0.excludes.iter().cloned().collect();
             s0_excludes.sort();
-            let mut s1_excludes: Vec<String> = s1.excludes.to_vec();
+            let mut s1_excludes: Vec<String> =
+                s1.excludes.iter().cloned().collect();
             s1_excludes.sort();
             assert_eq!(s0_excludes, s1_excludes);
 
-            let mut s0_tags: Vec<String> = s0.tags.to_vec();
+            let mut s0_tags: Vec<String> = s0.tags.iter().cloned().collect();
             s0_tags.sort();
-            let mut s1_tags: Vec<String> = s1.tags.to_vec();
+            let mut s1_tags: Vec<String> = s1.tags.iter().cloned().collect();
             s1_tags.sort();
             assert_eq!(s0_tags, s1_tags);
         }
@@ -355,7 +358,9 @@ fn cache_snapshots_entries() {
             "/home/user".to_string(),
             "/etc".to_string(),
             "/var".to_string(),
-        ],
+        ]
+        .into_iter()
+        .collect(),
         hostname: Some("foo.com".to_string()),
         username: Some("user".to_string()),
         uid: Some(123),
@@ -364,8 +369,12 @@ fn cache_snapshots_entries() {
             ".cache".to_string(),
             "Cache".to_string(),
             "/home/user/Downloads".to_string(),
-        ],
-        tags: vec!["foo_machine".to_string(), "rewrite".to_string()],
+        ]
+        .into_iter()
+        .collect(),
+        tags: vec!["foo_machine".to_string(), "rewrite".to_string()]
+            .into_iter()
+            .collect(),
         original_id: Some("fefwfwew".to_string()),
         program_version: Some("restic 0.16.0".to_string()),
     };
@@ -375,7 +384,7 @@ fn cache_snapshots_entries() {
         time: mk_datetime(2025, 5, 12, 17, 00, 00),
         parent: Some("wat".to_string()),
         tree: "anothertree".to_string(),
-        paths: vec!["/home/user".to_string()],
+        paths: vec!["/home/user".to_string()].into_iter().collect(),
         hostname: Some("foo.com".to_string()),
         username: Some("user".to_string()),
         uid: Some(123),
@@ -384,8 +393,12 @@ fn cache_snapshots_entries() {
             ".cache".to_string(),
             "Cache".to_string(),
             "/home/user/Downloads".to_string(),
-        ],
-        tags: vec!["foo_machine".to_string(), "rewrite".to_string()],
+        ]
+        .into_iter()
+        .collect(),
+        tags: vec!["foo_machine".to_string(), "rewrite".to_string()]
+            .into_iter()
+            .collect(),
         original_id: Some("fefwfwew".to_string()),
         program_version: Some("restic 0.16.0".to_string()),
     };
@@ -395,13 +408,13 @@ fn cache_snapshots_entries() {
         time: mk_datetime(2023, 5, 12, 17, 00, 00),
         parent: None,
         tree: "fwefwfwwefwefwe".to_string(),
-        paths: vec![],
+        paths: HashSet::new(),
         hostname: None,
         username: None,
         uid: None,
         gid: None,
-        excludes: vec![],
-        tags: vec![],
+        excludes: HashSet::new(),
+        tags: HashSet::new(),
         original_id: None,
         program_version: None,
     };
@@ -460,13 +473,13 @@ fn lots_of_snapshots() {
             time: timestamp_to_datetime(i as i64).unwrap(),
             parent: None,
             tree: i.to_string(),
-            paths: vec![],
+            paths: HashSet::new(),
             hostname: None,
             username: None,
             uid: None,
             gid: None,
-            excludes: vec![],
-            tags: vec![],
+            excludes: HashSet::new(),
+            tags: HashSet::new(),
             original_id: None,
             program_version: None,
         };
