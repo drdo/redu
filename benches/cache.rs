@@ -25,7 +25,9 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                 "/home/user".to_string(),
                 "/etc".to_string(),
                 "/var".to_string(),
-            ],
+            ]
+            .into_iter()
+            .collect(),
             hostname: Some("foo.com".to_string()),
             username: Some("user".to_string()),
             uid: Some(123),
@@ -34,8 +36,12 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                 ".cache".to_string(),
                 "Cache".to_string(),
                 "/home/user/Downloads".to_string(),
-            ],
-            tags: vec!["foo_machine".to_string(), "rewrite".to_string()],
+            ]
+            .into_iter()
+            .collect(),
+            tags: vec!["foo_machine".to_string(), "rewrite".to_string()]
+                .into_iter()
+                .collect(),
             original_id: Some("fefwfwew".to_string()),
             program_version: Some("restic 0.16.0".to_string()),
         };
@@ -63,7 +69,9 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                     "/home/user".to_string(),
                     "/etc".to_string(),
                     "/var".to_string(),
-                ],
+                ]
+                .into_iter()
+                .collect(),
                 hostname: Some("foo.com".to_string()),
                 username: Some("user".to_string()),
                 uid: Some(123),
@@ -72,8 +80,12 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                     ".cache".to_string(),
                     "Cache".to_string(),
                     "/home/user/Downloads".to_string(),
-                ],
-                tags: vec!["foo_machine".to_string(), "rewrite".to_string()],
+                ]
+                .into_iter()
+                .collect(),
+                tags: vec!["foo_machine".to_string(), "rewrite".to_string()]
+                    .into_iter()
+                    .collect(),
                 original_id: Some("fefwfwew".to_string()),
                 program_version: Some("restic 0.16.0".to_string()),
             }

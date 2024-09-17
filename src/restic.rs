@@ -3,6 +3,7 @@ use core::str;
 use std::os::unix::process::CommandExt;
 use std::{
     borrow::Cow,
+    collections::HashSet,
     ffi::OsStr,
     fmt::{self, Display, Formatter},
     io::{self, BufRead, BufReader, Lines, Read},
@@ -313,7 +314,7 @@ pub struct Snapshot {
     #[serde(default)]
     pub parent: Option<String>,
     pub tree: String,
-    pub paths: Vec<String>,
+    pub paths: HashSet<String>,
     #[serde(default)]
     pub hostname: Option<String>,
     #[serde(default)]
@@ -323,9 +324,9 @@ pub struct Snapshot {
     #[serde(default)]
     pub gid: Option<u32>,
     #[serde(default)]
-    pub excludes: Vec<String>,
+    pub excludes: HashSet<String>,
     #[serde(default)]
-    pub tags: Vec<String>,
+    pub tags: HashSet<String>,
     #[serde(default)]
     pub original_id: Option<String>,
     #[serde(default)]
