@@ -277,8 +277,8 @@ impl<T> Iter<T> {
 
     fn read_stderr<U>(&mut self, kind: ErrorKind) -> Result<U, Error> {
         let mut buf = String::new();
-        // FIXME: read_to_string can block forever if child's stdout is not read
-        // this means we never exit and the error is not shown or logged
+        // read_to_string would block forever if the child was still running.
+        let _ = self.child.kill();
         match self.child.stderr.take().unwrap().read_to_string(&mut buf) {
             Err(e) => Err(Error {
                 kind: ErrorKind::Run(RunError::Io(e)),
