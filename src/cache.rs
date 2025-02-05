@@ -557,19 +557,19 @@ impl<'a> Migrator<'a> {
 
 fn migrate_none_to_v0(conn: &mut Connection) -> Result<(), rusqlite::Error> {
     let tx = conn.transaction()?;
-    tx.execute_batch(include_str!("sql/none_to_v0.sql"))?;
+    tx.execute_batch(include_str!("cache/sql/none_to_v0.sql"))?;
     tx.commit()
 }
 
 fn migrate_none_to_v1(conn: &mut Connection) -> Result<(), rusqlite::Error> {
     let tx = conn.transaction()?;
-    tx.execute_batch(include_str!("sql/none_to_v1.sql"))?;
+    tx.execute_batch(include_str!("cache/sql/none_to_v1.sql"))?;
     tx.commit()
 }
 
 fn migrate_v0_to_v1(conn: &mut Connection) -> Result<(), rusqlite::Error> {
     let tx = conn.transaction()?;
-    tx.execute_batch(include_str!("sql/v0_to_v1.sql"))?;
+    tx.execute_batch(include_str!("cache/sql/v0_to_v1.sql"))?;
     tx.commit()
 }
 
