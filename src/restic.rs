@@ -6,7 +6,7 @@ use std::{
     collections::HashSet,
     ffi::OsStr,
     fmt::{self, Display, Formatter},
-    io::{self, BufRead, BufReader, Lines, Read},
+    io::{self, BufRead, BufReader, Lines, Read, Write},
     iter::Step,
     marker::PhantomData,
     mem,
@@ -218,25 +218,41 @@ impl Restic {
             Repository::File(file) => cmd.arg("--repository-file").arg(file),
         };
         match &self.password {
-            Password::Command(command) =>
-                cmd.arg("--password-command").arg(command),
-            Password::File(file) => cmd.arg("--password-file").arg(file),
-            // There's no way to hand over the password to restic directly, so we use the env
-            // variable instead.
-            Password::Plain(str) => cmd.env("RESTIC_PASSWORD", str),
+            Password::Command(command) => {
+                cmd.arg("--password-command").arg(command);
+                cmd.stdin(Stdio::null());
+            }
+            Password::File(file) => {
+                cmd.arg("--password-file").arg(file);
+                cmd.stdin(Stdio::null());
+            }
+            Password::Plain(_) => {
+                // passed via stdin after the process is started
+                cmd.stdin(Stdio::piped());
+            }
         };
         if self.no_cache {
             cmd.arg("--no-cache");
         }
         cmd.arg("--json");
+        // pass --quiet to remove informational messages in stdout mixed up with the JSON we want
+        // (https://github.com/restic/restic/issues/5236)
+        cmd.arg("--quiet");
         cmd.args(args);
-        let child = cmd
-            .stdin(Stdio::null())
+        let mut child = cmd
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .map_err(LaunchError)?;
         info!("running \"{cmd:?}\" (pid {})", child.id());
+        if let Password::Plain(ref password) = self.password {
+            let mut stdin = child
+                .stdin
+                .take()
+                .expect("child has no stdin when it should have");
+            stdin.write_all(password.as_bytes()).map_err(LaunchError)?;
+            stdin.write_all(b"\n").map_err(LaunchError)?;
+        }
         Ok(child)
     }
 }
@@ -261,6 +277,8 @@ impl<T> Iter<T> {
 
     fn read_stderr<U>(&mut self, kind: ErrorKind) -> Result<U, Error> {
         let mut buf = String::new();
+        // read_to_string would block forever if the child was still running.
+        let _ = self.child.kill();
         match self.child.stderr.take().unwrap().read_to_string(&mut buf) {
             Err(e) => Err(Error {
                 kind: ErrorKind::Run(RunError::Io(e)),
