@@ -77,7 +77,7 @@ impl Iterator for PathGenerator {
                 new_prefix.push(Utf8PathBuf::from(child.to_string()));
                 self.state.push((depth, prefix, child + 1));
                 if depth == 1 {
-                    break (Some(new_prefix));
+                    break Some(new_prefix);
                 } else {
                     self.state.push((depth - 1, new_prefix, 0));
                 }
