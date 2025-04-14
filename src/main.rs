@@ -58,7 +58,7 @@ fn main() -> anyhow::Result<()> {
     // Initialize the logger
     {
         fn generate_filename() -> String {
-            format!("{}.log", Local::now().format("%Y-%m-%dT%H:%M:%S%.f%:z"))
+            format!("{}.log", Local::now().format("%Y-%m-%dT%H-%M-%S%.f%z"))
         }
 
         let mut path = dirs.data_local_dir().to_path_buf();
