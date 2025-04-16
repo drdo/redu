@@ -74,8 +74,9 @@ fn main() -> anyhow::Result<()> {
                 .create_new(true)
                 .open(&path)
             {
-                Err(err) if err.kind() == io::ErrorKind::AlreadyExists =>
-                    path.set_file_name(generate_filename()),
+                Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {
+                    path.set_file_name(generate_filename())
+                }
                 x => break x,
             }
         }?;
@@ -415,14 +416,15 @@ fn convert_event(event: crossterm::event::Event) -> Option<Event> {
     ];
     match event {
         TermEvent::Resize(w, h) => Some(Resize(Size::new(w, h))),
-        TermEvent::Key(event) if [Press, Release].contains(&event.kind) =>
+        TermEvent::Key(event) if [Press, Release].contains(&event.kind) => {
             KEYBINDINGS.iter().find_map(|((mods, code), ui_event)| {
                 if event.modifiers == *mods && event.code == *code {
                     Some(ui_event.clone())
                 } else {
                     None
                 }
-            }),
+            })
+        }
         _ => None,
     }
 }

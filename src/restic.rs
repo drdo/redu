@@ -7,10 +7,9 @@ use std::{
     ffi::OsStr,
     fmt::{self, Display, Formatter},
     io::{self, BufRead, BufReader, Lines, Read, Write},
-    iter::Step,
     marker::PhantomData,
     mem,
-    process::{Child, ChildStdout, Command, ExitStatusError, Stdio},
+    process::{Child, ChildStdout, Command, Stdio},
     str::Utf8Error,
 };
 
@@ -34,8 +33,8 @@ pub enum RunError {
     Utf8(#[from] Utf8Error),
     #[error("error parsing JSON")]
     Parse(#[from] serde_json::Error),
-    #[error("the restic process exited with an error code")]
-    Exit(#[from] ExitStatusError),
+    #[error("the restic process exited with error code {}", if let Some(code) = .0 { code.to_string() } else { "None".to_string() } )]
+    Exit(Option<i32>),
 }
 
 #[derive(Debug, Error)]
@@ -61,12 +60,6 @@ impl From<Utf8Error> for ErrorKind {
 impl From<serde_json::Error> for ErrorKind {
     fn from(value: serde_json::Error) -> Self {
         ErrorKind::Run(RunError::Parse(value))
-    }
-}
-
-impl From<ExitStatusError> for ErrorKind {
-    fn from(value: ExitStatusError) -> Self {
-        ErrorKind::Run(RunError::Exit(value))
     }
 }
 
@@ -185,9 +178,13 @@ impl Restic {
             kind: ErrorKind::Run(RunError::Io(e)),
             stderr: None,
         })?;
-        let r_value = try {
-            output.status.exit_ok()?;
-            serde_json::from_str(str::from_utf8(&output.stdout)?)?
+        let r_value: Result<T, ErrorKind> = if output.status.success() {
+            match str::from_utf8(&output.stdout) {
+                Ok(s) => serde_json::from_str(s).map_err(|e| e.into()),
+                Err(e) => Err(e.into()),
+            }
+        } else {
+            Err(ErrorKind::Run(RunError::Exit(output.status.code())))
         };
         match r_value {
             Err(kind) => Err(Error {
@@ -299,11 +296,11 @@ impl<T: DeserializeOwned> Iterator for Iter<T> {
     type Item = Result<T, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(line) = self.lines.next() {
-            let r_value = try {
-                let line = line?;
-                serde_json::from_str(&line)?
-            };
+        if let Some(r_line) = self.lines.next() {
+            let r_value: Result<T, ErrorKind> =
+                r_line.map_err(|e| e.into()).and_then(|line| {
+                    serde_json::from_str(&line).map_err(|e| e.into())
+                });
             Some(match r_value {
                 Err(kind) => {
                     self.finish();
@@ -314,12 +311,18 @@ impl<T: DeserializeOwned> Iterator for Iter<T> {
         } else {
             self.finish();
             match self.child.wait() {
-                Err(e) =>
-                    Some(self.read_stderr(ErrorKind::Run(RunError::Io(e)))),
-                Ok(status) => match status.exit_ok() {
-                    Err(e) => Some(self.read_stderr(e.into())),
-                    Ok(()) => None,
-                },
+                Err(e) => {
+                    Some(self.read_stderr(ErrorKind::Run(RunError::Io(e))))
+                }
+                Ok(status) => {
+                    if status.success() {
+                        None
+                    } else {
+                        Some(self.read_stderr(ErrorKind::Run(RunError::Exit(
+                            status.code(),
+                        ))))
+                    }
+                }
             }
         }
     }
@@ -362,12 +365,30 @@ pub fn escape_for_exclude(path: &str) -> Cow<str> {
         ['*', '?', '[', '\\', '\r', '\n'].contains(&c)
     }
 
+    fn char_backward(c: char) -> char {
+        char::from_u32(
+            (c as u32).checked_sub(1).expect(
+                "char_backward: underflow when computing previous char",
+            ),
+        )
+        .expect("char_backward: invalid resulting character")
+    }
+
+    fn char_forward(c: char) -> char {
+        char::from_u32(
+            (c as u32)
+                .checked_add(1)
+                .expect("char_backward: overflow when computing next char"),
+        )
+        .expect("char_forward: invalid resulting character")
+    }
+
     fn push_as_inverse_range(buf: &mut String, c: char) {
         #[rustfmt::skip]
         let cs = [
             '[', '^',
-            char::MIN, '-', char::backward(c, 1),
-            char::forward(c, 1), '-', char::MAX,
+            char::MIN, '-', char_backward(c),
+            char_forward(c), '-', char::MAX,
             ']',
         ];
         for d in cs {

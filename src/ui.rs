@@ -107,27 +107,31 @@ impl App {
         use Event::*;
         match event {
             Resize(new_size) => self.resize(new_size),
-            Left =>
+            Left => {
                 if let Some(ref mut confirm_dialog) = self.confirm_dialog {
                     confirm_dialog.yes_selected = false;
                     Action::Render
                 } else {
                     self.left()
-                },
-            Right =>
+                }
+            }
+            Right => {
                 if let Some(ref mut confirm_dialog) = self.confirm_dialog {
                     confirm_dialog.yes_selected = true;
                     Action::Render
                 } else {
                     self.right()
-                },
+                }
+            }
             Up => self.move_selection(-1, true),
             Down => self.move_selection(1, true),
-            PageUp =>
-                self.move_selection(-(self.list_size.height as isize), false),
-            PageDown =>
-                self.move_selection(self.list_size.height as isize, false),
-            Enter =>
+            PageUp => {
+                self.move_selection(-(self.list_size.height as isize), false)
+            }
+            PageDown => {
+                self.move_selection(self.list_size.height as isize, false)
+            }
+            Enter => {
                 if let Some(confirm_dialog) = self.confirm_dialog.take() {
                     if confirm_dialog.yes_selected {
                         confirm_dialog.action
@@ -138,18 +142,20 @@ impl App {
                     Action::GetEntryDetails(self.entries[self.selected].path_id)
                 } else {
                     Action::Nothing
-                },
-            Exit =>
+                }
+            }
+            Exit => {
                 if self.confirm_dialog.take().is_some()
                     || self.details_drawer.take().is_some()
                 {
                     Action::Render
                 } else {
                     Action::Nothing
-                },
+                }
+            }
             Mark => self.mark_selection(),
             Unmark => self.unmark_selection(),
-            UnmarkAll =>
+            UnmarkAll => {
                 if self.confirm_dialog.is_none() {
                     self.confirm_dialog = Some(ConfirmDialog {
                         text: "Are you sure you want to delete all marks?"
@@ -162,7 +168,8 @@ impl App {
                     Action::Render
                 } else {
                     Action::Nothing
-                },
+                }
+            }
             Quit => Action::Quit,
             Generate => self.generate(),
             Entries { path_id, entries } => self.set_entries(path_id, entries),

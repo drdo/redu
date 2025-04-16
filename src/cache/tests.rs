@@ -194,59 +194,68 @@ fn sizetree_iter_empty() {
 fn insert_uniques_0() {
     let tree = example_tree_0();
     let entries = to_sorted_entries(&tree);
-    assert_eq!(entries, vec![
-        (vec!["a"], 13, true),
-        (vec!["a", "0"], 4, true),
-        (vec!["a", "0", "x"], 1, false),
-        (vec!["a", "0", "y"], 2, false),
-        (vec!["a", "0", "z"], 1, true),
-        (vec!["a", "0", "z", "0"], 1, false),
-        (vec!["a", "1"], 9, true),
-        (vec!["a", "1", "x"], 9, true),
-        (vec!["a", "1", "x", "0"], 7, false),
-        (vec!["a", "1", "x", "1"], 2, false),
-    ]);
+    assert_eq!(
+        entries,
+        vec![
+            (vec!["a"], 13, true),
+            (vec!["a", "0"], 4, true),
+            (vec!["a", "0", "x"], 1, false),
+            (vec!["a", "0", "y"], 2, false),
+            (vec!["a", "0", "z"], 1, true),
+            (vec!["a", "0", "z", "0"], 1, false),
+            (vec!["a", "1"], 9, true),
+            (vec!["a", "1", "x"], 9, true),
+            (vec!["a", "1", "x", "0"], 7, false),
+            (vec!["a", "1", "x", "1"], 2, false),
+        ]
+    );
 }
 
 #[test]
 fn insert_uniques_1() {
     let tree = example_tree_1();
     let entries = to_sorted_entries(&tree);
-    assert_eq!(entries, vec![
-        (vec!["a"], 22, true),
-        (vec!["a", "0"], 14, true),
-        (vec!["a", "0", "x"], 3, false),
-        (vec!["a", "0", "y"], 2, false),
-        (vec!["a", "0", "z"], 9, true),
-        (vec!["a", "0", "z", "0"], 9, false),
-        (vec!["a", "1"], 1, true),
-        (vec!["a", "1", "x"], 1, true),
-        (vec!["a", "1", "x", "1"], 1, false),
-        (vec!["a", "2"], 7, true),
-        (vec!["a", "2", "x"], 7, true),
-        (vec!["a", "2", "x", "0"], 7, false),
-    ]);
+    assert_eq!(
+        entries,
+        vec![
+            (vec!["a"], 22, true),
+            (vec!["a", "0"], 14, true),
+            (vec!["a", "0", "x"], 3, false),
+            (vec!["a", "0", "y"], 2, false),
+            (vec!["a", "0", "z"], 9, true),
+            (vec!["a", "0", "z", "0"], 9, false),
+            (vec!["a", "1"], 1, true),
+            (vec!["a", "1", "x"], 1, true),
+            (vec!["a", "1", "x", "1"], 1, false),
+            (vec!["a", "2"], 7, true),
+            (vec!["a", "2", "x"], 7, true),
+            (vec!["a", "2", "x", "0"], 7, false),
+        ]
+    );
 }
 
 #[test]
 fn insert_uniques_2() {
     let tree = example_tree_2();
     let entries = to_sorted_entries(&tree);
-    assert_eq!(entries, vec![
-        (vec!["a"], 8, true),
-        (vec!["a", "1"], 1, true),
-        (vec!["a", "1", "x"], 1, true),
-        (vec!["a", "1", "x", "1"], 1, false),
-        (vec!["a", "2"], 7, true),
-        (vec!["a", "2", "x"], 7, true),
-        (vec!["a", "2", "x", "0"], 7, false),
-        (vec!["b"], 14, true),
-        (vec!["b", "0"], 14, true),
-        (vec!["b", "0", "x"], 3, false),
-        (vec!["b", "0", "y"], 2, false),
-        (vec!["b", "0", "z"], 9, true),
-        (vec!["b", "0", "z", "0"], 9, false),
-    ]);
+    assert_eq!(
+        entries,
+        vec![
+            (vec!["a"], 8, true),
+            (vec!["a", "1"], 1, true),
+            (vec!["a", "1", "x"], 1, true),
+            (vec!["a", "1", "x", "1"], 1, false),
+            (vec!["a", "2"], 7, true),
+            (vec!["a", "2", "x"], 7, true),
+            (vec!["a", "2", "x", "0"], 7, false),
+            (vec!["b"], 14, true),
+            (vec!["b", "0"], 14, true),
+            (vec!["b", "0", "x"], 3, false),
+            (vec!["b", "0", "y"], 2, false),
+            (vec!["b", "0", "z"], 9, true),
+            (vec!["b", "0", "z", "0"], 9, false),
+        ]
+    );
 }
 
 #[test]
@@ -267,21 +276,24 @@ fn insert_existing() {
 fn merge_test() {
     let tree = example_tree_0().merge(example_tree_1());
     let entries = to_sorted_entries(&tree);
-    assert_eq!(entries, vec![
-        (vec!["a"], 22, true),
-        (vec!["a", "0"], 14, true),
-        (vec!["a", "0", "x"], 3, false),
-        (vec!["a", "0", "y"], 2, false),
-        (vec!["a", "0", "z"], 9, true),
-        (vec!["a", "0", "z", "0"], 9, false),
-        (vec!["a", "1"], 9, true),
-        (vec!["a", "1", "x"], 9, true),
-        (vec!["a", "1", "x", "0"], 7, false),
-        (vec!["a", "1", "x", "1"], 2, false),
-        (vec!["a", "2"], 7, true),
-        (vec!["a", "2", "x"], 7, true),
-        (vec!["a", "2", "x", "0"], 7, false),
-    ]);
+    assert_eq!(
+        entries,
+        vec![
+            (vec!["a"], 22, true),
+            (vec!["a", "0"], 14, true),
+            (vec!["a", "0", "x"], 3, false),
+            (vec!["a", "0", "y"], 2, false),
+            (vec!["a", "0", "z"], 9, true),
+            (vec!["a", "0", "z", "0"], 9, false),
+            (vec!["a", "1"], 9, true),
+            (vec!["a", "1", "x"], 9, true),
+            (vec!["a", "1", "x", "0"], 7, false),
+            (vec!["a", "1", "x", "1"], 2, false),
+            (vec!["a", "2"], 7, true),
+            (vec!["a", "2", "x"], 7, true),
+            (vec!["a", "2", "x", "0"], 7, false),
+        ]
+    );
 }
 
 #[test]
@@ -495,14 +507,18 @@ fn lots_of_snapshots() {
     // get_entry_details
     let path_id = cache.get_path_id_by_path("a/0".into()).unwrap().unwrap();
     let details = cache.get_entry_details(path_id).unwrap().unwrap();
-    assert_eq!(details, EntryDetails {
-        max_size: 4,
-        max_size_snapshot_hash: (NUM_SNAPSHOTS - 1).to_string(),
-        first_seen: timestamp_to_datetime(0).unwrap(),
-        first_seen_snapshot_hash: 0.to_string(),
-        last_seen: timestamp_to_datetime((NUM_SNAPSHOTS - 1) as i64).unwrap(),
-        last_seen_snapshot_hash: (NUM_SNAPSHOTS - 1).to_string(),
-    });
+    assert_eq!(
+        details,
+        EntryDetails {
+            max_size: 4,
+            max_size_snapshot_hash: (NUM_SNAPSHOTS - 1).to_string(),
+            first_seen: timestamp_to_datetime(0).unwrap(),
+            first_seen_snapshot_hash: 0.to_string(),
+            last_seen: timestamp_to_datetime((NUM_SNAPSHOTS - 1) as i64)
+                .unwrap(),
+            last_seen_snapshot_hash: (NUM_SNAPSHOTS - 1).to_string(),
+        }
+    );
 }
 
 ////////// Migrations //////////////////////////////////////////////////////////
@@ -550,15 +566,18 @@ fn test_migrate_v0_to_v1() {
     let cache =
         Migrator::open_with_target(&file.0, 1).unwrap().migrate().unwrap();
 
-    assert_tables(&cache.conn, &[
-        "metadata_integer",
-        "paths",
-        "snapshots",
-        "snapshot_paths",
-        "snapshot_excludes",
-        "snapshot_tags",
-        "marks",
-    ]);
+    assert_tables(
+        &cache.conn,
+        &[
+            "metadata_integer",
+            "paths",
+            "snapshots",
+            "snapshot_paths",
+            "snapshot_excludes",
+            "snapshot_tags",
+            "marks",
+        ],
+    );
 
     assert_marks(&cache, &marks);
 
