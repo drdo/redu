@@ -12,6 +12,7 @@ pub struct Args {
     pub parallelism: usize,
     pub log_level: LevelFilter,
     pub no_cache: bool,
+    pub rustic: bool,
 }
 
 impl Args {
@@ -43,6 +44,7 @@ impl Args {
                 _ => LevelFilter::Trace,
             },
             no_cache: cli.no_cache,
+            rustic: cli.rustic,
         }
     }
 
@@ -121,4 +123,8 @@ struct Cli {
     /// Pass the --no-cache option to restic subprocesses.
     #[arg(long)]
     no_cache: bool,
+
+    /// use build-in rustic functionality instead of calling the restic binary
+    #[arg(long)]
+    rustic: bool,
 }

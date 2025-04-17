@@ -50,7 +50,8 @@ mod util;
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    let restic = Restic::new(args.repository, args.password, args.no_cache);
+    let restic =
+        Restic::new(args.repository, args.password, args.no_cache, args.rustic);
 
     let dirs = ProjectDirs::from("eu", "drdo", "redu")
         .expect("unable to determine project directory");
