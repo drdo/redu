@@ -21,6 +21,17 @@ use serde::{de::DeserializeOwned, Deserialize};
 use serde_json::Value;
 use thiserror::Error;
 
+use rustic_backend::BackendOptions;
+use rustic_core::{
+    repofile::Node, FullIndex, IndexedStatus, LsOptions, NoProgressBars,
+    OpenStatus, RepositoryOptions,
+};
+
+type RusticRepo = rustic_core::Repository<
+    NoProgressBars,
+    IndexedStatus<FullIndex, OpenStatus>,
+>;
+
 #[derive(Debug, Error)]
 #[error("error launching restic process")]
 pub struct LaunchError(#[source] pub io::Error);
@@ -43,6 +54,8 @@ pub enum ErrorKind {
     Launch(#[from] LaunchError),
     #[error("error while running restic process")]
     Run(#[from] RunError),
+    #[error("rustic error")]
+    Rustic(#[from] anyhow::Error),
 }
 
 impl From<io::Error> for ErrorKind {
@@ -85,15 +98,26 @@ impl From<LaunchError> for Error {
     }
 }
 
+impl From<anyhow::Error> for Error {
+    fn from(value: anyhow::Error) -> Self {
+        Error { kind: ErrorKind::Rustic(value), stderr: None }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct Config {
     pub id: String,
+}
+
+struct Rustic {
+    repo: RusticRepo,
 }
 
 pub struct Restic {
     repository: Repository,
     password: Password,
     no_cache: bool,
+    rustic: Option<Rustic>,
 }
 
 #[derive(Debug)]
@@ -114,28 +138,120 @@ pub enum Password {
     File(String),
 }
 
+impl Rustic {
+    fn new(
+        repository: &Repository,
+        password: &Password,
+        no_cache: bool,
+    ) -> Result<Self, anyhow::Error> {
+        // TODO: only repository/password is now supported, better would be to use BackendOptions and RepositoryOptions directly in your CLI options.
+        // Note that they support clap when using the `clap` feature!
+        // Alternatively support rustic config files directly which would allow to run without using any of those options, see e.g. the rustic_rs crate.
+        let repo = match repository {
+            Repository::Repo(repo) => repo,
+            _ => unimplemented!(),
+        };
+        let password = match password {
+            Password::Plain(pass) => pass,
+            _ => unimplemented!(),
+        };
+
+        let backends =
+            BackendOptions::default().repository(repo).to_backends()?;
+        let repo_opts =
+            RepositoryOptions::default().password(password).no_cache(no_cache);
+        let repo = rustic_core::Repository::new(&repo_opts, &backends)?
+            .open()?
+            .to_indexed()?;
+        Ok(Self { repo })
+    }
+
+    fn config(&self) -> Result<Config, anyhow::Error> {
+        let config = Config { id: self.repo.config_id()?.unwrap().to_string() };
+        Ok(config)
+    }
+
+    fn snapshots(&self) -> Result<Vec<Snapshot>, anyhow::Error> {
+        let snaps = self.repo.get_all_snapshots()?;
+        let snaps = snaps
+            .into_iter()
+            .map(|sn| Snapshot {
+                id: sn.id.to_string(),
+                time: sn.time.into(),
+                ..Default::default()
+            }) //only id and time is really used, for rustic_core it would be better would be to also have use the tree or the whole rustic:core::Snapshot -> see rustic_ls
+            .collect();
+        Ok(snaps)
+    }
+
+    fn ls(
+        &self,
+        snapshot: &str,
+    ) -> Result<
+        impl Iterator<Item = Result<File, anyhow::Error>> + 'static,
+        anyhow::Error,
+    > {
+        // Note: This re-reads the snapshot which is actually not needed, as rustic_snapshots is always run before and already has the Snapshot information.
+        // In that case, we could use repo.node_from_snapshot_and_path(snap,"") or repo.node_from_path(root_tree,"")
+        let node = self.repo.node_from_snapshot_path(snapshot, |_| true)?;
+
+        let ls_opts = LsOptions::default(); // TODO: I think redu supports filtering ls which could be configured here...
+
+        let lsmap = |lsitem| -> Result<File, anyhow::Error> {
+            let (path, node): (_, Node) = lsitem?;
+            let path = Utf8PathBuf::from_path_buf(path)
+                .map_err(|_| anyhow::anyhow!("non-utf filename"))?;
+            let size = node.meta.size.try_into()?;
+            Ok(File { path, size })
+        };
+
+        let list: Vec<_> = self.repo.ls(&node, &ls_opts)?.map(lsmap).collect();
+        Ok(list.into_iter())
+    }
+}
+
 impl Restic {
     pub fn new(
         repository: Repository,
         password: Password,
         no_cache: bool,
-    ) -> Self {
-        Restic { repository, password, no_cache }
+        rustic: bool,
+    ) -> Result<Self, Error> {
+        let rustic =
+            rustic.then_some(Rustic::new(&repository, &password, no_cache)?);
+        Ok(Restic { repository, password, no_cache, rustic })
     }
 
     pub fn config(&self) -> Result<Config, Error> {
+        if let Some(rustic) = &self.rustic {
+            return Ok(rustic.config()?);
+        }
         self.run_greedy_command(["cat", "config"])
     }
 
     pub fn snapshots(&self) -> Result<Vec<Snapshot>, Error> {
+        if let Some(rustic) = &self.rustic {
+            return Ok(rustic.snapshots()?);
+        }
         self.run_greedy_command(["snapshots"])
     }
 
     pub fn ls(
         &self,
         snapshot: &str,
-    ) -> Result<impl Iterator<Item = Result<File, Error>> + 'static, LaunchError>
+    ) -> Result<impl Iterator<Item = Result<File, Error>> + 'static, Error>
     {
+        if let Some(rustic) = &self.rustic {
+            let result: Box<
+                dyn Iterator<Item = Result<File, Error>> + 'static,
+            > = Box::new(
+                rustic
+                    .ls(snapshot)?
+                    .map(|item| -> Result<_, Error> { Ok(item?) }),
+            );
+            return Ok(result);
+        }
+
         fn parse_file(mut v: Value) -> Option<File> {
             let mut m = mem::take(v.as_object_mut()?);
             Some(File {
@@ -144,9 +260,12 @@ impl Restic {
             })
         }
 
-        Ok(self
-            .run_lazy_command(["ls", snapshot])?
-            .filter_map(|r| r.map(parse_file).transpose()))
+        let result: Box<dyn Iterator<Item = Result<File, Error>> + 'static> =
+            Box::new(
+                self.run_lazy_command(["ls", snapshot])?
+                    .filter_map(|r| r.map(parse_file).transpose()),
+            );
+        Ok(result)
     }
 
     // This is a trait object because of
@@ -328,7 +447,7 @@ impl<T: DeserializeOwned> Iterator for Iter<T> {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct Snapshot {
     pub id: String,
     pub time: DateTime<Utc>,
