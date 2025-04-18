@@ -24,9 +24,8 @@ Note: On MacOS if you download via browser you might need to remove quarantine w
 
 or you can install with cargo:
 ```
-cargo +nightly install redu --locked
+cargo install redu --locked
 ```
-Note: it currently requires nightly to build.
 
 # Running
 
