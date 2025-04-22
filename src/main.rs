@@ -387,10 +387,7 @@ fn db_thread_body(
 }
 
 fn convert_event(event: crossterm::event::Event) -> Option<Event> {
-    use crossterm::event::{
-        Event as TermEvent,
-        KeyEventKind::{Press, Release},
-    };
+    use crossterm::event::{Event as TermEvent, KeyEventKind};
     use ui::Event::*;
 
     const KEYBINDINGS: &[((KeyModifiers, KeyCode), Event)] = &[
@@ -416,7 +413,7 @@ fn convert_event(event: crossterm::event::Event) -> Option<Event> {
     ];
     match event {
         TermEvent::Resize(w, h) => Some(Resize(Size::new(w, h))),
-        TermEvent::Key(event) if [Press, Release].contains(&event.kind) => {
+        TermEvent::Key(event) if event.kind == KeyEventKind::Press => {
             KEYBINDINGS.iter().find_map(|((mods, code), ui_event)| {
                 if event.modifiers == *mods && event.code == *code {
                     Some(ui_event.clone())
