@@ -48,6 +48,15 @@ mod args;
 mod ui;
 mod util;
 
+// Print the message to stderr and log at INFO level
+macro_rules! info_eprintln {
+    ($($arg:expr),+) => {{
+        let msg = format!($($arg),+);
+        eprintln!("{msg}");
+        info!("{msg}");
+    }};
+}
+
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let restic = Restic::new(args.repository, args.password, args.no_cache);
@@ -114,11 +123,13 @@ fn main() -> anyhow::Result<()> {
         );
         fs::create_dir_all(dirs.cache_dir()).expect(&err_msg);
 
-        eprintln!("Using cache file {cache_file:#?}");
+        info_eprintln!("Using cache file {cache_file:#?}");
         let migrator =
             Migrator::open(&cache_file).context("unable to open cache file")?;
         if let Some((old, new)) = migrator.need_to_migrate() {
-            eprintln!("Need to upgrade cache version from {old:?} to {new:?}");
+            info_eprintln!(
+                "Need to upgrade cache version from {old:?} to {new:?}"
+            );
             let mut template =
                 String::from(" {spinner} Upgrading cache version");
             if migrator.resync_necessary() {
@@ -164,7 +175,10 @@ fn sync_snapshots(
         })
         .collect();
     if !snapshots_to_delete.is_empty() {
-        eprintln!("Need to delete {} snapshot(s)", snapshots_to_delete.len());
+        info_eprintln!(
+            "Need to delete {} snapshot(s)",
+            snapshots_to_delete.len()
+        );
         let pb = new_pb(" {spinner} {wide_bar} [{pos}/{len}]");
         pb.set_length(snapshots_to_delete.len() as u64);
         for snapshot in snapshots_to_delete {
@@ -185,7 +199,7 @@ fn sync_snapshots(
     missing_snapshots.shuffle(&mut thread_rng());
     let total_missing_snapshots = match missing_snapshots.len() {
         0 => {
-            eprintln!("Snapshots up to date");
+            info_eprintln!("Snapshots up to date");
             return Ok(());
         }
         n => n,
@@ -429,7 +443,7 @@ fn convert_event(event: crossterm::event::Event) -> Option<Event> {
 fn ui(mut cache: Cache) -> anyhow::Result<Vec<Utf8PathBuf>> {
     let entries = cache.get_entries(None)?;
     if entries.is_empty() {
-        eprintln!("The repository is empty!");
+        info_eprintln!("The repository is empty!");
         return Ok(vec![]);
     }
 
