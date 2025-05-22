@@ -225,6 +225,8 @@ fn sync_snapshots(
         }
         let mut handles: Vec<ScopedJoinHandle<anyhow::Result<()>>> = Vec::new();
 
+        // TODO: Check that we are correctly handling the situation where a thread panics
+
         // The threads periodically poll this to see if they should
         // prematurely terminate (when other threads get unrecoverable errors).
         let should_quit: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
