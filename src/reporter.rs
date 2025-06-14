@@ -3,66 +3,59 @@ use std::time::Duration;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 pub trait Reporter {
-    type Loader: Item;
-    type Counter: Item + Counter;
-    type Bar: Item + Counter;
+    fn print(&self, msg: &str);
 
-    fn print<M: AsRef<str>>(&self, msg: M);
+    fn add_loader(&self, level: usize, msg: &str) -> Box<dyn Item + Send>;
 
-    fn add_loader<M: AsRef<str>>(&self, level: usize, msg: M) -> Self::Loader;
-
-    fn add_counter<P: AsRef<str>, S: AsRef<str>>(
+    fn add_counter(
         &self,
         level: usize,
-        prefix: P,
-        suffix: S,
-    ) -> Self::Counter;
+        prefix: &str,
+        suffix: &str,
+    ) -> Box<dyn Counter + Send>;
 
-    fn add_bar<P: AsRef<str>>(
+    fn add_bar(
         &self,
         level: usize,
-        prefix: P,
+        prefix: &str,
         total: u64,
-    ) -> Self::Bar;
+    ) -> Box<dyn Counter + Send>;
 }
 
 impl<T: Reporter> Reporter for &T {
-    type Loader = T::Loader;
-    type Counter = T::Counter;
-    type Bar = T::Bar;
-
-    fn print<M: AsRef<str>>(&self, msg: M) {
+    fn print(&self, msg: &str) {
         (*self).print(msg);
     }
 
-    fn add_loader<M: AsRef<str>>(&self, level: usize, msg: M) -> Self::Loader {
+    fn add_loader(&self, level: usize, msg: &str) -> Box<dyn Item + Send> {
         (*self).add_loader(level, msg)
     }
 
-    fn add_counter<P: AsRef<str>, S: AsRef<str>>(
+    fn add_counter(
         &self,
         level: usize,
-        prefix: P,
-        suffix: S,
-    ) -> Self::Counter {
+        prefix: &str,
+        suffix: &str,
+    ) -> Box<dyn Counter + Send> {
         (*self).add_counter(level, prefix, suffix)
     }
 
-    fn add_bar<P: AsRef<str>>(
+    fn add_bar(
         &self,
         level: usize,
-        prefix: P,
+        prefix: &str,
         total: u64,
-    ) -> Self::Bar {
+    ) -> Box<dyn Counter + Send> {
         (*self).add_bar(level, prefix, total)
     }
 }
 
 pub trait Item {
-    fn end(self);
+    fn end(self: Box<Self>);
 }
 
 pub trait Counter {
+    fn end(self: Box<Self>);
     fn inc(&mut self, delta: u64);
 }
 
@@ -93,56 +86,51 @@ impl Default for TermReporter {
 }
 
 impl Reporter for TermReporter {
-    type Loader = TermItem;
-    type Counter = TermItem;
-    type Bar = TermItem;
-
-    fn print<M: AsRef<str>>(&self, msg: M) {
-        self.0.suspend(|| eprintln!("{}", msg.as_ref()));
+    fn print(&self, msg: &str) {
+        eprintln!("{msg}");
     }
 
-    fn add_loader<M: AsRef<str>>(&self, level: usize, msg: M) -> Self::Loader {
-        self.add(
-            format!("{}{{spinner}} {}", " ".repeat(level), msg.as_ref()),
-            None,
+    fn add_loader(&self, level: usize, msg: &str) -> Box<dyn Item + Send> {
+        Box::new(
+            self.add(format!("{}{{spinner}} {}", " ".repeat(level), msg), None),
         )
     }
 
-    fn add_counter<P: AsRef<str>, S: AsRef<str>>(
+    fn add_counter(
         &self,
         level: usize,
-        prefix: P,
-        suffix: S,
-    ) -> Self::Counter {
-        self.add(
+        prefix: &str,
+        suffix: &str,
+    ) -> Box<dyn Counter + Send> {
+        Box::new(self.add(
             format!(
                 "{}{{spinner}} {}{{pos}}{}",
                 " ".repeat(level),
-                prefix.as_ref(),
-                suffix.as_ref()
+                prefix,
+                suffix,
             ),
             None,
-        )
+        ))
     }
 
-    fn add_bar<P: AsRef<str>>(
+    fn add_bar(
         &self,
         level: usize,
-        prefix: P,
+        prefix: &str,
         total: u64,
-    ) -> Self::Bar {
-        self.add(
+    ) -> Box<dyn Counter + Send> {
+        Box::new(self.add(
             format!(
                 "{}{{spinner}} {}{{wide_bar}} [{{pos}}/{{len}}]",
                 " ".repeat(level),
-                prefix.as_ref(),
+                prefix,
             ),
             Some(total),
-        )
+        ))
     }
 }
 
-pub struct TermItem {
+struct TermItem {
     parent: TermReporter,
     pb: ProgressBar,
 }
@@ -155,10 +143,13 @@ impl Drop for TermItem {
 }
 
 impl Item for TermItem {
-    fn end(self) {}
+    fn end(self: Box<Self>) {}
 }
 
 impl Counter for TermItem {
+    fn end(self: Box<Self>) {
+        <Self as Item>::end(self)
+    }
     fn inc(&mut self, delta: u64) {
         self.pb.inc(delta);
     }
@@ -182,3 +173,58 @@ fn new_pb(template: &str) -> ProgressBar {
 }
 
 const PB_TICK_INTERVAL: Duration = Duration::from_millis(100);
+
+////////// NullReporter ////////////////////////////////////////////////////////
+pub struct NullReporter;
+
+impl NullReporter {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for NullReporter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Reporter for NullReporter {
+    fn print(&self, _msg: &str) {}
+
+    fn add_loader(&self, _level: usize, _msg: &str) -> Box<dyn Item + Send> {
+        Box::new(NullItem)
+    }
+
+    fn add_counter(
+        &self,
+        _level: usize,
+        _prefix: &str,
+        _suffix: &str,
+    ) -> Box<dyn Counter + Send> {
+        Box::new(NullItem)
+    }
+
+    fn add_bar(
+        &self,
+        _level: usize,
+        _prefix: &str,
+        _total: u64,
+    ) -> Box<dyn Counter + Send> {
+        Box::new(NullItem)
+    }
+}
+
+struct NullItem;
+
+impl Item for NullItem {
+    fn end(self: Box<Self>) {}
+}
+
+impl Counter for NullItem {
+    fn end(self: Box<Self>) {
+        <Self as Item>::end(self)
+    }
+
+    fn inc(&mut self, _delta: u64) {}
+}

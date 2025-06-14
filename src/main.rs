@@ -34,7 +34,7 @@ use ratatui::{
 };
 use redu::{
     cache::{self, filetree::SizeTree, Cache, Migrator},
-    reporter::{Counter, Item, Reporter, TermReporter},
+    reporter::{Counter, NullReporter, Reporter, TermReporter},
     restic::{self, escape_for_exclude, Restic, Snapshot},
 };
 use scopeguard::defer;
@@ -65,7 +65,14 @@ fn main() -> anyhow::Result<()> {
         .expect("unable to determine project directory");
 
     // Initialize the logger
-    {
+    let log_config = simplelog::ConfigBuilder::new()
+        .set_target_level(LevelFilter::Error)
+        .set_thread_mode(ThreadLogMode::Names)
+        .build();
+
+    if args.non_interactive {
+        WriteLogger::init(args.log_level, log_config, stderr())?;
+    } else {
         fn generate_filename() -> String {
             format!("{}.log", Local::now().format("%Y-%m-%dT%H-%M-%S%.f%z"))
         }
@@ -92,11 +99,7 @@ fn main() -> anyhow::Result<()> {
 
         eprintln!("Logging to {:#?}", path);
 
-        let config = simplelog::ConfigBuilder::new()
-            .set_target_level(LevelFilter::Error)
-            .set_thread_mode(ThreadLogMode::Names)
-            .build();
-        WriteLogger::init(args.log_level, config, file)?;
+        WriteLogger::init(args.log_level, log_config, file)?;
     }
 
     unsafe {
@@ -105,7 +108,11 @@ fn main() -> anyhow::Result<()> {
         }))?;
     }
 
-    let reporter = TermReporter::new();
+    let reporter: Arc<dyn Reporter + Send + Sync> = if args.non_interactive {
+        Arc::new(NullReporter::new())
+    } else {
+        Arc::new(TermReporter::new())
+    };
 
     let mut cache = {
         // Get config to determine repo id and open cache
@@ -146,10 +153,12 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    sync_snapshots(&restic, &mut cache, &reporter, args.parallelism)?;
+    sync_snapshots(&restic, &mut cache, reporter.clone(), args.parallelism)?;
 
-    if !args.non_interactive {
-        let paths = ui(reporter, cache)?;
+    if args.non_interactive {
+        info_report!(reporter, "Finished syncing");
+    } else {
+        let paths = ui(&*reporter, cache)?;
         for line in paths {
             println!("{}", escape_for_exclude(line.as_str()));
         }
@@ -158,16 +167,12 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn sync_snapshots<R>(
+fn sync_snapshots<R: Reporter + Send + Sync + ?Sized>(
     restic: &Restic,
     cache: &mut Cache,
-    reporter: R,
+    reporter: Arc<R>,
     fetching_thread_count: usize,
-) -> anyhow::Result<()>
-where
-    R: Reporter + Clone + Send,
-    R::Bar: Send,
-{
+) -> anyhow::Result<()> {
     let progress = reporter.add_loader(0, "Fetching repository snapshot list");
     let repo_snapshots = restic.snapshots()?;
     progress.end();
@@ -189,16 +194,17 @@ where
             "Need to delete {} snapshot(s)",
             snapshots_to_delete.len()
         );
-        let mut progress = reporter.add_bar(
+        let mut bar = reporter.add_bar(
             0,
             "Deleting snapshots ",
             snapshots_to_delete.len() as u64,
         );
         for snapshot in snapshots_to_delete {
             cache.delete_snapshot(&snapshot.id)?;
-            progress.inc(1);
+            info!("deleted snapshot {}", snapshot.id);
+            bar.inc(1);
         }
-        progress.end();
+        bar.end();
     }
 
     let mut missing_snapshots: Vec<Snapshot> = repo_snapshots
@@ -215,11 +221,14 @@ where
             info_report!(reporter, "Snapshots up to date");
             return Ok(());
         }
-        n => n,
+        n => {
+            info_report!(reporter, "Need to fetch {n} snapshot(s)");
+            n
+        }
     };
     let missing_queue = FixedSizeQueue::new(missing_snapshots);
 
-    let main_progress = reporter.add_bar(
+    let fetch_snapshots_bar = reporter.add_bar(
         0,
         "Fetching snapshots ",
         total_missing_snapshots as u64,
@@ -271,12 +280,13 @@ where
 
         // Start DB thread
         handles.push({
+            let reporter = reporter.clone();
             let should_quit = should_quit.clone();
             spawn!("db", &scope, move || {
                 db_thread_body(
                     cache,
-                    reporter,
-                    main_progress,
+                    &*reporter,
+                    fetch_snapshots_bar,
                     snapshot_receiver,
                     should_quit.clone(),
                     SHOULD_QUIT_POLL_PERIOD,
@@ -301,10 +311,10 @@ enum FetchingThreadError {
     Cache(#[from] rusqlite::Error),
 }
 
-fn fetching_thread_body(
+fn fetching_thread_body<R: Reporter + ?Sized>(
     restic: &Restic,
     missing_queue: FixedSizeQueue<Snapshot>,
-    reporter: impl Reporter,
+    reporter: Arc<R>,
     snapshot_sender: mpsc::SyncSender<(Snapshot, SizeTree)>,
     should_quit: Arc<AtomicBool>,
 ) -> Result<(), FetchingThreadError> {
@@ -314,7 +324,7 @@ fn fetching_thread_body(
         let short_id = snapshot_short_id(&snapshot.id);
         let mut progress = reporter.add_counter(
             4,
-            format!("fetching {short_id} "),
+            &format!("fetching {short_id} "),
             " file(s)",
         );
         let mut sizetree = SizeTree::new();
@@ -355,10 +365,10 @@ enum DBThreadError {
     CacheError(#[from] rusqlite::Error),
 }
 
-fn db_thread_body(
+fn db_thread_body<R: Reporter + ?Sized>(
     cache: &mut Cache,
-    reporter: impl Reporter,
-    mut main_pb: impl Counter,
+    reporter: &R,
+    mut fetch_snapshots_bar: Box<dyn Counter>,
     snapshot_receiver: mpsc::Receiver<(Snapshot, SizeTree)>,
     should_quit: Arc<AtomicBool>,
     should_quit_poll_period: Duration,
@@ -384,11 +394,11 @@ fn db_thread_body(
                 }
                 let short_id = snapshot_short_id(&snapshot.id);
                 let progress =
-                    reporter.add_loader(4, format!("saving {short_id}"));
+                    reporter.add_loader(4, &format!("saving {short_id}"));
                 let start = Instant::now();
                 let file_count = cache.save_snapshot(&snapshot, sizetree)?;
                 progress.end();
-                main_pb.inc(1);
+                fetch_snapshots_bar.inc(1);
                 info!(
                     "waited {}s to save snapshot ({} files)",
                     start.elapsed().as_secs_f64(),
@@ -445,8 +455,8 @@ fn convert_event(event: crossterm::event::Event) -> Option<Event> {
     }
 }
 
-fn ui(
-    reporter: impl Reporter,
+fn ui<R: Reporter + ?Sized>(
+    reporter: &R,
     mut cache: Cache,
 ) -> anyhow::Result<Vec<Utf8PathBuf>> {
     let entries = cache.get_entries(None)?;
