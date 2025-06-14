@@ -12,6 +12,7 @@ pub struct Args {
     pub parallelism: usize,
     pub log_level: LevelFilter,
     pub no_cache: bool,
+    pub non_interactive: bool,
 }
 
 impl Args {
@@ -43,6 +44,7 @@ impl Args {
                 _ => LevelFilter::Trace,
             },
             no_cache: cli.no_cache,
+            non_interactive: cli.non_interactive,
         }
     }
 
@@ -121,4 +123,8 @@ struct Cli {
     /// Pass the --no-cache option to restic subprocesses.
     #[arg(long)]
     no_cache: bool,
+
+    /// Run redu only to update the cache, without any UI and without requiring a terminal. Exits when done.
+    #[arg(long)]
+    non_interactive: bool,
 }

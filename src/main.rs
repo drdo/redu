@@ -23,7 +23,6 @@ use crossterm::{
     ExecutableCommand,
 };
 use directories::ProjectDirs;
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::{debug, error, info, trace, LevelFilter};
 use rand::{seq::SliceRandom, thread_rng};
 use ratatui::{
@@ -35,6 +34,7 @@ use ratatui::{
 };
 use redu::{
     cache::{self, filetree::SizeTree, Cache, Migrator},
+    reporter::{Counter, NullReporter, Reporter, TermReporter},
     restic::{self, escape_for_exclude, Restic, Snapshot},
 };
 use scopeguard::defer;
@@ -48,6 +48,15 @@ mod args;
 mod ui;
 mod util;
 
+// Print the message via the reporter and log at INFO level
+macro_rules! info_report {
+    ($reporter:expr, $($arg:expr),+) => {{
+        let msg = format!($($arg),+);
+        $reporter.print(&msg);
+        info!("{msg}");
+    }};
+}
+
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let restic = Restic::new(args.repository, args.password, args.no_cache);
@@ -56,7 +65,14 @@ fn main() -> anyhow::Result<()> {
         .expect("unable to determine project directory");
 
     // Initialize the logger
-    {
+    let log_config = simplelog::ConfigBuilder::new()
+        .set_target_level(LevelFilter::Error)
+        .set_thread_mode(ThreadLogMode::Names)
+        .build();
+
+    if args.non_interactive {
+        WriteLogger::init(args.log_level, log_config, stderr())?;
+    } else {
         fn generate_filename() -> String {
             format!("{}.log", Local::now().format("%Y-%m-%dT%H-%M-%S%.f%z"))
         }
@@ -83,11 +99,7 @@ fn main() -> anyhow::Result<()> {
 
         eprintln!("Logging to {:#?}", path);
 
-        let config = simplelog::ConfigBuilder::new()
-            .set_target_level(LevelFilter::Error)
-            .set_thread_mode(ThreadLogMode::Names)
-            .build();
-        WriteLogger::init(args.log_level, config, file)?;
+        WriteLogger::init(args.log_level, log_config, file)?;
     }
 
     unsafe {
@@ -96,11 +108,17 @@ fn main() -> anyhow::Result<()> {
         }))?;
     }
 
+    let reporter: Arc<dyn Reporter + Send + Sync> = if args.non_interactive {
+        Arc::new(NullReporter::new())
+    } else {
+        Arc::new(TermReporter::new())
+    };
+
     let mut cache = {
         // Get config to determine repo id and open cache
-        let pb = new_pb(" {spinner} Getting restic config");
+        let progress = reporter.add_loader(0, "Getting restic config");
         let repo_id = restic.config()?.id;
-        pb.finish();
+        progress.end();
 
         let cache_file = {
             let mut path = dirs.cache_dir().to_path_buf();
@@ -114,43 +132,50 @@ fn main() -> anyhow::Result<()> {
         );
         fs::create_dir_all(dirs.cache_dir()).expect(&err_msg);
 
-        eprintln!("Using cache file {cache_file:#?}");
+        info_report!(reporter, "Using cache file {cache_file:#?}");
         let migrator =
             Migrator::open(&cache_file).context("unable to open cache file")?;
         if let Some((old, new)) = migrator.need_to_migrate() {
-            eprintln!("Need to upgrade cache version from {old:?} to {new:?}");
-            let mut template =
-                String::from(" {spinner} Upgrading cache version");
+            info_report!(
+                reporter,
+                "Need to upgrade cache version from {old:?} to {new:?}"
+            );
+            let mut msg = String::from("Upgrading cache version");
             if migrator.resync_necessary() {
-                template.push_str(" (a resync will be necessary)");
+                msg.push_str(" (a resync will be necessary)");
             }
-            let pb = new_pb(&template);
+            let progress = reporter.add_loader(0, &msg);
             let cache = migrator.migrate().context("cache migration failed")?;
-            pb.finish();
+            progress.end();
             cache
         } else {
             migrator.migrate().context("there is a problem with the cache")?
         }
     };
 
-    sync_snapshots(&restic, &mut cache, args.parallelism)?;
+    sync_snapshots(&restic, &mut cache, reporter.clone(), args.parallelism)?;
 
-    let paths = ui(cache)?;
-    for line in paths {
-        println!("{}", escape_for_exclude(line.as_str()));
+    if args.non_interactive {
+        info_report!(reporter, "Finished syncing");
+    } else {
+        let paths = ui(&*reporter, cache)?;
+        for line in paths {
+            println!("{}", escape_for_exclude(line.as_str()));
+        }
     }
 
     Ok(())
 }
 
-fn sync_snapshots(
+fn sync_snapshots<R: Reporter + Send + Sync + ?Sized>(
     restic: &Restic,
     cache: &mut Cache,
+    reporter: Arc<R>,
     fetching_thread_count: usize,
 ) -> anyhow::Result<()> {
-    let pb = new_pb(" {spinner} Fetching repository snapshot list");
+    let progress = reporter.add_loader(0, "Fetching repository snapshot list");
     let repo_snapshots = restic.snapshots()?;
-    pb.finish();
+    progress.end();
 
     let cache_snapshots = cache.get_snapshots()?;
 
@@ -164,14 +189,22 @@ fn sync_snapshots(
         })
         .collect();
     if !snapshots_to_delete.is_empty() {
-        eprintln!("Need to delete {} snapshot(s)", snapshots_to_delete.len());
-        let pb = new_pb(" {spinner} {wide_bar} [{pos}/{len}]");
-        pb.set_length(snapshots_to_delete.len() as u64);
+        info_report!(
+            reporter,
+            "Need to delete {} snapshot(s)",
+            snapshots_to_delete.len()
+        );
+        let mut bar = reporter.add_bar(
+            0,
+            "Deleting snapshots ",
+            snapshots_to_delete.len() as u64,
+        );
         for snapshot in snapshots_to_delete {
             cache.delete_snapshot(&snapshot.id)?;
-            pb.inc(1);
+            info!("deleted snapshot {}", snapshot.id);
+            bar.inc(1);
         }
-        pb.finish();
+        bar.end();
     }
 
     let mut missing_snapshots: Vec<Snapshot> = repo_snapshots
@@ -185,19 +218,21 @@ fn sync_snapshots(
     missing_snapshots.shuffle(&mut thread_rng());
     let total_missing_snapshots = match missing_snapshots.len() {
         0 => {
-            eprintln!("Snapshots up to date");
+            info_report!(reporter, "Snapshots up to date");
             return Ok(());
         }
-        n => n,
+        n => {
+            info_report!(reporter, "Need to fetch {n} snapshot(s)");
+            n
+        }
     };
     let missing_queue = FixedSizeQueue::new(missing_snapshots);
 
-    // Create progress indicators
-    let mpb = MultiProgress::new();
-    let pb =
-        mpb_insert_end(&mpb, " {spinner} {prefix} {wide_bar} [{pos}/{len}] ");
-    pb.set_prefix("Fetching snapshots");
-    pb.set_length(total_missing_snapshots as u64);
+    let fetch_snapshots_bar = reporter.add_bar(
+        0,
+        "Fetching snapshots ",
+        total_missing_snapshots as u64,
+    );
 
     const SHOULD_QUIT_POLL_PERIOD: Duration = Duration::from_millis(500);
 
@@ -211,6 +246,8 @@ fn sync_snapshots(
         }
         let mut handles: Vec<ScopedJoinHandle<anyhow::Result<()>>> = Vec::new();
 
+        // TODO: Check that we are correctly handling the situation where a thread panics
+
         // The threads periodically poll this to see if they should
         // prematurely terminate (when other threads get unrecoverable errors).
         let should_quit: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
@@ -223,13 +260,13 @@ fn sync_snapshots(
         for i in 0..fetching_thread_count {
             let missing_queue = missing_queue.clone();
             let snapshot_sender = snapshot_sender.clone();
-            let mpb = mpb.clone();
+            let reporter = reporter.clone();
             let should_quit = should_quit.clone();
             handles.push(spawn!("fetching-{i}", &scope, move || {
                 fetching_thread_body(
                     restic,
                     missing_queue,
-                    mpb,
+                    reporter,
                     snapshot_sender,
                     should_quit.clone(),
                 )
@@ -243,12 +280,13 @@ fn sync_snapshots(
 
         // Start DB thread
         handles.push({
+            let reporter = reporter.clone();
             let should_quit = should_quit.clone();
             spawn!("db", &scope, move || {
                 db_thread_body(
                     cache,
-                    mpb,
-                    pb,
+                    &*reporter,
+                    fetch_snapshots_bar,
                     snapshot_receiver,
                     should_quit.clone(),
                     SHOULD_QUIT_POLL_PERIOD,
@@ -273,10 +311,10 @@ enum FetchingThreadError {
     Cache(#[from] rusqlite::Error),
 }
 
-fn fetching_thread_body(
+fn fetching_thread_body<R: Reporter + ?Sized>(
     restic: &Restic,
     missing_queue: FixedSizeQueue<Snapshot>,
-    mpb: MultiProgress,
+    reporter: Arc<R>,
     snapshot_sender: mpsc::SyncSender<(Snapshot, SizeTree)>,
     should_quit: Arc<AtomicBool>,
 ) -> Result<(), FetchingThreadError> {
@@ -284,9 +322,11 @@ fn fetching_thread_body(
     trace!("started");
     while let Some(snapshot) = missing_queue.pop() {
         let short_id = snapshot_short_id(&snapshot.id);
-        let pb =
-            mpb_insert_end(&mpb, "   {spinner} fetching {prefix}: starting up")
-                .with_prefix(short_id.clone());
+        let mut progress = reporter.add_counter(
+            4,
+            &format!("fetching {short_id} "),
+            " file(s)",
+        );
         let mut sizetree = SizeTree::new();
         let files = restic.ls(&snapshot.id)?;
         trace!("started fetching snapshot ({short_id})");
@@ -299,15 +339,9 @@ fn fetching_thread_body(
             sizetree
                 .insert(file.path.components(), file.size)
                 .expect("repeated entry in restic snapshot ls");
-            if pb.position() == 0 {
-                pb.set_style(new_style(
-                    "   {spinner} fetching {prefix}: {pos} file(s)",
-                ));
-            }
-            pb.inc(1);
+            progress.inc(1);
         }
-        pb.finish_and_clear();
-        mpb.remove(&pb);
+        progress.end();
         info!(
             "snapshot fetched in {}s ({short_id})",
             start.elapsed().as_secs_f64()
@@ -331,10 +365,10 @@ enum DBThreadError {
     CacheError(#[from] rusqlite::Error),
 }
 
-fn db_thread_body(
+fn db_thread_body<R: Reporter + ?Sized>(
     cache: &mut Cache,
-    mpb: MultiProgress,
-    main_pb: ProgressBar,
+    reporter: &R,
+    mut fetch_snapshots_bar: Box<dyn Counter>,
     snapshot_receiver: mpsc::Receiver<(Snapshot, SizeTree)>,
     should_quit: Arc<AtomicBool>,
     should_quit_poll_period: Duration,
@@ -359,17 +393,12 @@ fn db_thread_body(
                     return Ok(());
                 }
                 let short_id = snapshot_short_id(&snapshot.id);
-                let pb = mpb_insert_after(
-                    &mpb,
-                    &main_pb,
-                    "   {spinner} saving {prefix}",
-                )
-                .with_prefix(short_id.clone());
+                let progress =
+                    reporter.add_loader(4, &format!("saving {short_id}"));
                 let start = Instant::now();
                 let file_count = cache.save_snapshot(&snapshot, sizetree)?;
-                pb.finish_and_clear();
-                mpb.remove(&pb);
-                main_pb.inc(1);
+                progress.end();
+                fetch_snapshots_bar.inc(1);
                 info!(
                     "waited {}s to save snapshot ({} files)",
                     start.elapsed().as_secs_f64(),
@@ -426,10 +455,13 @@ fn convert_event(event: crossterm::event::Event) -> Option<Event> {
     }
 }
 
-fn ui(mut cache: Cache) -> anyhow::Result<Vec<Utf8PathBuf>> {
+fn ui<R: Reporter + ?Sized>(
+    reporter: &R,
+    mut cache: Cache,
+) -> anyhow::Result<Vec<Utf8PathBuf>> {
     let entries = cache.get_entries(None)?;
     if entries.is_empty() {
-        eprintln!("The repository is empty!");
+        info_report!(reporter, "The repository is empty!");
         return Ok(vec![]);
     }
 
@@ -523,49 +555,6 @@ fn render<'a>(
 }
 
 /// Util ///////////////////////////////////////////////////////////////////////
-fn new_style(template: &str) -> ProgressStyle {
-    let frames = &[
-        "(●    )",
-        "( ●   )",
-        "(  ●  )",
-        "(   ● )",
-        "(   ● )",
-        "(  ●  )",
-        "( ●   )",
-        "(●    )",
-        "(●    )",
-    ];
-    ProgressStyle::with_template(template).unwrap().tick_strings(frames)
-}
-
-const PB_TICK_INTERVAL: Duration = Duration::from_millis(100);
-
-fn new_pb(template: &str) -> ProgressBar {
-    let pb = ProgressBar::new_spinner().with_style(new_style(template));
-    pb.enable_steady_tick(PB_TICK_INTERVAL);
-    pb
-}
-
-// This is necessary to avoid some weird redraws that happen
-// when enabling the tick thread before adding to the MultiProgress.
-fn mpb_insert_after(
-    mpb: &MultiProgress,
-    other_pb: &ProgressBar,
-    template: &str,
-) -> ProgressBar {
-    let pb = ProgressBar::new_spinner().with_style(new_style(template));
-    let pb = mpb.insert_after(other_pb, pb);
-    pb.enable_steady_tick(PB_TICK_INTERVAL);
-    pb
-}
-
-fn mpb_insert_end(mpb: &MultiProgress, template: &str) -> ProgressBar {
-    let pb = ProgressBar::new_spinner().with_style(new_style(template));
-    let pb = mpb.add(pb);
-    pb.enable_steady_tick(PB_TICK_INTERVAL);
-    pb
-}
-
 #[derive(Clone)]
 struct FixedSizeQueue<T>(Arc<Mutex<Vec<T>>>);
 
