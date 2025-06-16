@@ -51,6 +51,11 @@ are supported as well and work just like in restic.
 Similar to restic, redu will prompt you to enter the password, if it isn't
 given any other way.
 
+### Other options
+- `--non-interactive`: Run redu only to update the cache, without any UI and without requiring a terminal. Logs to stderr and exits when done.
+- `-v`: Log verbosity level. You can pass it multiple times (maxes out at two).
+- `-j`: How many restic subprocesses to spawn concurrently. Default: 4.
+
 # Usage
 Redu keeps a cache with your file/directory sizes (per repo).
 On each run it will sync the cache with the snapshots in your repo,
