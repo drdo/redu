@@ -8,8 +8,11 @@ use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
 use log::trace;
 use rusqlite::{
-    functions::FunctionFlags, params, types::FromSqlError, Connection,
-    OptionalExtension,
+    functions::FunctionFlags,
+    params,
+    trace::{TraceEvent, TraceEventCodes},
+    types::FromSqlError,
+    Connection, OptionalExtension,
 };
 use thiserror::Error;
 
@@ -500,7 +503,7 @@ impl<'a> Migrator<'a> {
 
     // We don't try to find multi step migrations.
     fn open_(file: &Path, target: VersionId) -> Result<Self, MigrationError> {
-        let mut conn = Connection::open(file)?;
+        let conn = Connection::open(file)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         // This is only used in V0
@@ -523,9 +526,14 @@ impl<'a> Migrator<'a> {
                 }))
             },
         )?;
-        conn.profile(Some(|stmt, duration| {
-            trace!("SQL {stmt} (took {duration:#?})")
-        }));
+        conn.trace_v2(
+            TraceEventCodes::SQLITE_TRACE_PROFILE,
+            Some(|e| {
+                if let TraceEvent::Profile(stmt, duration) = e {
+                    trace!("SQL {} (took {:#?})", stmt.sql(), duration);
+                }
+            }),
+        );
         let current = determine_version(&conn)?;
         if current == Some(target) {
             return Ok(Migrator { conn, migration: None });
