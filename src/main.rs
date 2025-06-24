@@ -24,7 +24,7 @@ use crossterm::{
 };
 use directories::ProjectDirs;
 use log::{debug, error, info, trace, LevelFilter};
-use rand::{seq::SliceRandom, thread_rng};
+use rand::{rng, seq::SliceRandom};
 use ratatui::{
     backend::{Backend, CrosstermBackend},
     layout::Size,
@@ -215,7 +215,7 @@ fn sync_snapshots<R: Reporter + Send + Sync + ?Sized>(
                 .any(|cache_snapshot| cache_snapshot.id == repo_snapshot.id)
         })
         .collect();
-    missing_snapshots.shuffle(&mut thread_rng());
+    missing_snapshots.shuffle(&mut rng());
     let total_missing_snapshots = match missing_snapshots.len() {
         0 => {
             info_report!(reporter, "Snapshots up to date");
