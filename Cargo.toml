@@ -19,7 +19,7 @@ crossterm = "0.29"
 directories = "6"
 simplelog = "0.12"
 humansize = "2"
-indicatif = "0.17"
+indicatif = "0.18"
 log = "0.4"
 rand = "0.9"
 ratatui = { version = "0.29", features = [
@@ -27,7 +27,7 @@ ratatui = { version = "0.29", features = [
     "unstable-widget-ref",
 ] }
 rpassword = "7.3.1"
-rusqlite = { version = "0.35", features = ["bundled", "functions", "trace"] }
+rusqlite = { version = "0.37", features = ["bundled", "functions", "trace"] }
 scopeguard = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -36,7 +36,7 @@ unicode-segmentation = "1"
 uuid = { version = "1", features = ["v4"], optional = true }
 
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.29", features = ["process"] }
+nix = { version = "0.30", features = ["process"] }
 
 [lib]
 path = "src/lib.rs"
@@ -53,7 +53,7 @@ codegen-units = 1
 lto = "fat"
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.7", features = ["html_reports"] }
 uuid = { version = "1", features = ["v4"] }
 
 [[bench]]
