@@ -485,7 +485,7 @@ fn render_name(
     is_dir: bool,
     selected: bool,
     available_width: usize,
-) -> Span {
+) -> Span<'_> {
     let mut escaped = escape_name(name);
     if is_dir {
         if !escaped.ends_with('/') {
@@ -504,7 +504,7 @@ fn render_name(
     }
 }
 
-fn escape_name(name: &str) -> Cow<str> {
+fn escape_name(name: &str) -> Cow<'_, str> {
     match name.find(char::is_control) {
         None => Cow::Borrowed(name),
         Some(index) => {
@@ -525,7 +525,7 @@ fn escape_name(name: &str) -> Cow<str> {
     }
 }
 
-fn shorten_to(s: &str, width: usize) -> Cow<str> {
+fn shorten_to(s: &str, width: usize) -> Cow<'_, str> {
     let len = s.graphemes(true).count();
     let res = if len <= width {
         Cow::Borrowed(s)

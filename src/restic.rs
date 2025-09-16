@@ -360,7 +360,7 @@ pub struct File {
     pub size: usize,
 }
 
-pub fn escape_for_exclude(path: &str) -> Cow<str> {
+pub fn escape_for_exclude(path: &str) -> Cow<'_, str> {
     fn is_special(c: char) -> bool {
         ['*', '?', '[', '\\', '\r', '\n'].contains(&c)
     }
