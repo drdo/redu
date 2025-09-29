@@ -10,8 +10,18 @@ redu aggregates data from **all** snapshots into one view so you can easily find
 the culprits!
 
 # Installing
+## Cargo
+```
+cargo install redu --locked
+```
 
-You can either grab a pre-built binary from Github, currently available for:
+## Nix
+```
+nix-env -i redu
+```
+
+## Prebuilt binaries
+You can grab a pre-built binary from Github, currently available for:
 - Darwin (MacOS) arm64
 - Darwin (MacOS) x86-64
 - Linux arm64
@@ -21,11 +31,6 @@ You can either grab a pre-built binary from Github, currently available for:
 
 Note: On MacOS if you download via browser you might need to remove quarantine with:
 `xattr -d com.apple.quarantine <binary name>`
-
-or you can install with cargo:
-```
-cargo install redu --locked
-```
 
 # Running
 
