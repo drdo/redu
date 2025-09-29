@@ -10,56 +10,68 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build-linux-x86_64:
+  rustfmt-check:
     runs-on: ubuntu-24.04
     steps:
-    - uses: actions/checkout@v4
-    - name: Rustfmt Check
-      run: cargo fmt --check
-    - name: Add x86_64-unknown-linux-musl target
-      run: |
-        rustup target add x86_64-unknown-linux-musl
-        sudo apt-get -y update
-        sudo apt-get -y install musl-dev musl-tools
-    - name: Build
-      run: cargo build --target=x86_64-unknown-linux-musl --verbose
-    - name: Run tests
-      run: cargo test --verbose
-    - name: Build benches
-      run: cargo bench --features bench --no-run
+      - uses: actions/checkout@v4
+      - name: Install rustfmt
+        run: rustup component add --toolchain stable-x86_64-unknown-linux-gnu rustfmt
+      - name: Rustfmt Check
+        run: cargo fmt --check
+  build-test-linux-x86_64:
+    needs: rustfmt-check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add x86_64-unknown-linux-musl target
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          sudo apt-get -y update
+          sudo apt-get -y install musl-dev musl-tools
+      - name: Build
+        run: cargo build --target=x86_64-unknown-linux-musl --verbose
+      - name: Build benches
+        run: cargo bench --target=x86_64-unknown-linux-musl --features bench --no-run
+      - name: Run tests
+        run: cargo test --target=x86_64-unknown-linux-musl --verbose
   build-linux-arm64:
+    needs: rustfmt-check
     runs-on: ubuntu-24.04
     steps:
-    - uses: actions/checkout@v4
-    - name: Install cross
-      run: cargo install cross
-    - name: Build
-      run: cross build --target aarch64-unknown-linux-musl --verbose
+      - uses: actions/checkout@v4
+      - name: Install cross
+        run: cargo install cross
+      - name: Build
+        run: cross build --target aarch64-unknown-linux-musl --verbose
   build-darwin-x86_64:
+    needs: rustfmt-check
     runs-on: macos-13
     steps:
-    - uses: actions/checkout@v4
-    - name: Build
-      run: cargo build --verbose
+      - uses: actions/checkout@v4
+      - name: Build
+        run: cargo build --verbose
   build-darwin-arm64:
+    needs: rustfmt-check
     runs-on: macos-14
     steps:
-    - uses: actions/checkout@v4
-    - name: Build
-      run: cargo build --verbose
+      - uses: actions/checkout@v4
+      - name: Build
+        run: cargo build --verbose
   build-windows-x86_64:
+    needs: rustfmt-check
     runs-on: windows-2022
     steps:
-    - uses: actions/checkout@v4
-    - name: Build
-      run: cargo build --target=x86_64-pc-windows-msvc --verbose
-    - name: Run tests
-      run: cargo test --verbose
+      - uses: actions/checkout@v4
+      - name: Build
+        run: cargo build --target=x86_64-pc-windows-msvc --verbose
+      - name: Run tests
+        run: cargo test --verbose
   build-windows-arm64:
+    needs: rustfmt-check
     runs-on: windows-2022
     steps:
-    - uses: actions/checkout@v4
-    - name: Add aarch64-pc-windows-msvc target
-      run: rustup target add aarch64-pc-windows-msvc
-    - name: Build
-      run: cargo build --target=aarch64-pc-windows-msvc --verbose
+      - uses: actions/checkout@v4
+      - name: Add aarch64-pc-windows-msvc target
+        run: rustup target add aarch64-pc-windows-msvc
+      - name: Build
+        run: cargo build --target=aarch64-pc-windows-msvc --verbose
