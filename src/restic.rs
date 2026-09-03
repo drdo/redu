@@ -94,6 +94,7 @@ pub struct Restic {
     repository: Repository,
     password: Password,
     no_cache: bool,
+    tags: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -119,8 +120,9 @@ impl Restic {
         repository: Repository,
         password: Password,
         no_cache: bool,
+        tags: Vec<String>,
     ) -> Self {
-        Restic { repository, password, no_cache }
+        Restic { repository, password, no_cache, tags }
     }
 
     pub fn config(&self) -> Result<Config, Error> {
@@ -128,7 +130,12 @@ impl Restic {
     }
 
     pub fn snapshots(&self) -> Result<Vec<Snapshot>, Error> {
-        self.run_greedy_command(["snapshots"])
+        let mut args = vec!["snapshots"];
+        for tag in &self.tags {
+            args.push("--tag");
+            args.push(tag);
+        }
+        self.run_greedy_command(args)
     }
 
     pub fn ls(

@@ -61,6 +61,7 @@ given any other way.
 - `--non-interactive`: Run redu only to update the cache, without any UI and without requiring a terminal. Logs to stderr and exits when done.
 - `-v`: Log verbosity level. You can pass it multiple times (maxes out at two).
 - `-j`: How many restic subprocesses to spawn concurrently. Default: 4.
+- `--tag`: Filter the listed snapshots by tag. Repeatable — e.g. `--tag backups --tag images` shows only snapshots carrying those tags.
 
 # Usage
 Redu keeps a cache with your file/directory sizes (per repo).

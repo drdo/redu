@@ -13,6 +13,7 @@ pub struct Args {
     pub log_level: LevelFilter,
     pub no_cache: bool,
     pub non_interactive: bool,
+    pub tags: Vec<String>,
 }
 
 impl Args {
@@ -45,6 +46,7 @@ impl Args {
             },
             no_cache: cli.no_cache,
             non_interactive: cli.non_interactive,
+            tags: cli.tags,
         }
     }
 
@@ -127,4 +129,8 @@ struct Cli {
     /// Run redu only to update the cache, without any UI and without requiring a terminal. Exits when done.
     #[arg(long)]
     non_interactive: bool,
+
+    /// Filter the listed snapshots by tag. Repeatable — e.g. --tag backups --tag images.
+    #[arg(long = "tag", value_name = "TAG", action = clap::ArgAction::Append)]
+    tags: Vec<String>,
 }
