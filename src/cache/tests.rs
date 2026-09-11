@@ -297,7 +297,7 @@ fn merge_test() {
 }
 
 #[test]
-fn merge_reflexivity() {
+fn merge_idempotence() {
     assert_eq!(example_tree_0().merge(example_tree_0()), example_tree_0());
     assert_eq!(example_tree_1().merge(example_tree_1()), example_tree_1());
 }
