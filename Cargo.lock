@@ -1618,7 +1618,7 @@ dependencies = [
 
 [[package]]
 name = "redu"
-version = "0.2.15"
+version = "0.2.16"
 dependencies = [
  "anyhow",
  "camino",
